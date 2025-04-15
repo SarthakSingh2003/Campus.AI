@@ -1,0 +1,2 @@
+D:/voice_chatbot_assistant/android/app/.cxx/Debug/6y4q3e2n/x86/CMakeFiles/edit_cache.dir
+D:/voice_chatbot_assistant/android/app/.cxx/Debug/6y4q3e2n/x86/CMakeFiles/rebuild_cache.dir

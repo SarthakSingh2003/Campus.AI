@@ -1,0 +1,528 @@
+import 'dart:math';
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:translator/translator.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:voice_chatbot_assistant/api_key.dart';
+import 'package:voice_chatbot_assistant/components/custom_button.dart';
+import 'package:voice_chatbot_assistant/components/pip_camera_box.dart';
+import 'package:voice_chatbot_assistant/components/shopping_dialog_box.dart';
+import 'package:voice_chatbot_assistant/components/smart_house_dialog_box.dart';
+import 'package:voice_chatbot_assistant/components/travel_plans_dialog_box.dart';
+import 'package:voice_chatbot_assistant/components/vehicle_dialog_box.dart';
+import 'package:voice_chatbot_assistant/constant/languages.dart';
+import 'package:voice_chatbot_assistant/constant/messages.dart';
+import 'package:voice_chatbot_assistant/screens/tts.dart';
+import '../components/assistant_message.dart';
+import '../components/user_message.dart';
+import 'dart:async';
+
+class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  TtsService ttsService = TtsService();
+  final SpeechToText speechToTextInstance = SpeechToText();
+  final GoogleTranslator translator = GoogleTranslator();
+  String recordedAudioString = "";
+  String translatedString = "";
+  String detectedLanguage = "";
+  Timer? _silenceTimer;
+  bool _isSilenceDetected = false;
+  bool _showCamera = false;
+  Offset _cameraPosition = const Offset(100, 100);
+  bool _isCameraAvailable = false;
+  String _errorMessage = '';
+
+  // Gemini Pro model instance
+  late final GenerativeModel model;
+
+  List<Map<String, String>> messages = dummyMessages;
+  bool isLoading = false;
+  bool isRecording = false;
+
+  String selectedLanguageCode = 'en';
+  List<Map<String, String>> languages = language;
+  Map<String, Map<String, String>> voiceSettings = voiceSetting;
+
+  var _assistantResponse = "";
+  String errorMessage = "";
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize Gemini model
+    model = GenerativeModel(
+      model: 'gemini-1.5-pro-002',
+      apiKey: geminiApiKey,
+    );
+    initializeSpeechToText();
+    initializeTextToSpeech();
+    _checkAndRequestPermission();
+    speakDummyMessages();
+  }
+
+  void speakDummyMessages() async {
+    for (var message in messages) {
+      if (message['role'] == 'assistant') {
+        await ttsService.setLanguage('en-IN');
+        // await ttsService.setVoice(voiceSettings['en']!);
+        await ttsService.setSpeechRate(
+            0.4 + Random().nextDouble() * 5.5); // Adjust speech rate if needed
+        await ttsService
+            .setPitch(1.3 + Random().nextDouble() * 0.4); // Adjust pitch
+        await ttsService.setVolume(1.0);
+        await ttsService.speak(message['content']!);
+      }
+    }
+  }
+  Future<void> _checkAndRequestPermission() async {
+    PermissionStatus status = await Permission.camera.status;
+
+    if (status.isDenied) {
+      // Request permission if denied
+      status = await Permission.camera.request();
+    }
+
+    if (status.isGranted) {
+      // If permission is granted, check for camera availability
+      _checkCameraAvailability();
+    } else if (status.isPermanentlyDenied) {
+      // If permission is permanently denied, show error
+      setState(() {
+        _errorMessage = "Camera permission is permanently denied. Please enable it in settings.";
+      });
+      openAppSettings(); // Direct user to app settings if permission is permanently denied
+    } else {
+      // Handle other permission states (denied, restricted, etc.)
+      setState(() {
+        _errorMessage = "Camera permission is required to use this feature.";
+      });
+    }
+  }
+  Future<void> _checkCameraAvailability() async {
+    try {
+      final cameras = await availableCameras(); // Check available cameras
+      if (cameras.isNotEmpty) {
+        setState(() {
+          _isCameraAvailable = true; // Camera is available
+          _errorMessage = ''; // Clear error message if camera is available
+        });
+      } else {
+        setState(() {
+          _isCameraAvailable = false; // No camera available
+          _errorMessage = 'No camera available on this device.';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isCameraAvailable = false; // Error handling in case camera access fails
+        _errorMessage = 'Failed to access the camera. Please try again.';
+      });
+    }
+  }
+  // Initialize text-to-speech and log available voices
+  void initializeTextToSpeech() async {
+    try {
+      // Get the voice settings for the selected language
+      // Log all available voices
+      final langSettings = langSetting[selectedLanguageCode];
+      // Set the language, speech rate, pitch, and volume for the selected language
+      await ttsService.setLanguage(langSettings!);
+      await ttsService.setSpeechRate(
+          0.4 + Random().nextDouble() * 8.5); // Adjust speech rate if needed
+      await ttsService
+          .setPitch(5.3 + Random().nextDouble() * 0.4); // Adjust pitch
+      await ttsService.setVolume(2.0); // Adjust volume
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error initializing text-to-speech: $e");
+      }
+    }
+  }
+
+  Future<void> getChatResponse(String message) async {
+    setState(() {
+      isLoading = true;
+    });
+    initializeTextToSpeech();
+
+    // Custom hardcoded responses
+    if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
+      _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
+    } else if (message.contains('sleepless') || message.contains('feeling sleepless')) {
+      _assistantResponse = "Hey, I’ve been observing you...";
+    } else {
+      // Gemini API call for dynamic responses
+      try {
+        final prompt = "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
+            "Provide practical advice for: $message";
+
+        final response = await model.generateContent([Content.text(prompt)]);
+
+        if (response.text != null && response.text!.isNotEmpty) {
+          _assistantResponse = response.text!;
+        } else {
+          _assistantResponse = 'Sorry, I couldn’t generate a response.';
+        }
+      } catch (e) {
+        _assistantResponse = 'Error fetching response. Please try again.';
+        if (kDebugMode) {
+          print("Gemini API Error: $e");
+        }
+      }
+    }
+
+    setState(() {
+      messages.add({'role': 'assistant', 'content': _assistantResponse});
+      isLoading = false;
+    });
+
+    await ttsService.speak(_assistantResponse);
+  }
+
+  Future<String> detectLanguage(String text) async {
+    // Translate the text to a known language (e.g., English) to infer the source language
+    var translation = await translator.translate(text, to: 'en');
+    // If the text is not in English, the source language is detected by translation
+    return translation.sourceLanguage
+        .toString(); // This will give you the detected language
+  }
+
+  Future<void> translateText(String text) async {
+    String detectedLanguage = await detectLanguage(text);
+    if (kDebugMode) {
+      print("Detected Language: $detectedLanguage");
+    }
+    for (var lang in languages) {
+      if (lang['name']!.toLowerCase() == detectedLanguage.toLowerCase()) {
+        selectedLanguageCode = lang['code']!;
+        break;
+      } else {
+        selectedLanguageCode = 'en';
+      }
+    }
+    if (kDebugMode) {
+      print("SelectedLanguageCode : $selectedLanguageCode");
+    }
+
+    final translated =
+        await translator.translate(text, from: 'en', to: selectedLanguageCode);
+    setState(() {
+      translatedString = translated.text;
+      messages = List<Map<String, String>>.from(messages);
+      messages.add({'role': 'user', 'content': translatedString});
+    });
+
+    await getChatResponse(translatedString.toLowerCase());
+  }
+
+  void initializeSpeechToText() async {
+    await speechToTextInstance.initialize();
+    setState(() {});
+  }
+
+  void startListeningNow() async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      isRecording = true;
+      errorMessage = "";
+      _isSilenceDetected = false;
+      _silenceTimer?.cancel();
+    });
+    await speechToTextInstance.listen(
+        onResult: onSpeechToTextResult,
+        listenFor: const Duration(seconds: 15), // Adjust duration if necessary
+        pauseFor: const Duration(
+            seconds: 10), // Time to pause if no speech is detected
+        onSoundLevelChange: (level) {
+          if (kDebugMode) {
+            print("Sound level: $level");
+          }
+          // Reset the timer every time there's noise (i.e., sound level > threshold)
+
+          if (level > 1) {
+            // Adjust threshold if needed
+            // Sound detected, reset timer
+            _silenceTimer?.cancel();
+            _isSilenceDetected = false;
+          } else if (!_isSilenceDetected) {
+            // If silence has not yet been detected
+            _silenceTimer?.cancel(); // Cancel any previous timer
+            _silenceTimer = Timer(const Duration(seconds: 2), () {
+              if (kDebugMode) {
+                print("4 seconds of silence detected, stopping recording...");
+              }
+              setState(() {
+                _isSilenceDetected = true; // Mark silence as detected
+                isRecording = false;
+              });
+              stopListeningNow();
+            });
+          }
+        });
+  }
+
+  void stopListeningNow() async {
+    await speechToTextInstance.stop();
+    setState(() {
+      isRecording = false;
+      _isSilenceDetected = true;
+      _silenceTimer?.cancel();
+    });
+    if (recordedAudioString.isEmpty) {
+      setState(() {
+        errorMessage =
+            "No speech detected. Please try again."; // Show error if no speech
+      });
+      Future.delayed(const Duration(seconds: 3), () {
+        setState(() {
+          errorMessage = "";
+        });
+      });
+    } else {
+      await translateText(recordedAudioString);
+      setState(() {
+        recordedAudioString = '';
+      });
+    }
+  }
+
+  void onSpeechToTextResult(SpeechRecognitionResult recognitionResult) {
+    setState(() {
+      recordedAudioString = recognitionResult.recognizedWords;
+    });
+    if (kDebugMode) {
+      print("Speech Result: $recordedAudioString");
+    }
+  }
+
+  void clear() async {
+    setState(() {
+      messages = List.from(dummyMessages);
+      errorMessage = "";
+    });
+    await ttsService.stop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text("Chat"),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushReplacementNamed(context, '/homeScreen');
+          },
+        ),
+        backgroundColor: Colors.white,
+      ),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (errorMessage.isNotEmpty) // Show error if exists
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: Text(
+                      errorMessage,
+                      style: const TextStyle(color: Colors.red, fontSize: 16),
+                    ),
+                  ),
+                messages.isEmpty
+                    ? const Center(
+                  child: Text(
+                    'Start a conversation!',
+                    style: TextStyle(fontSize: 18, color: Colors.blue),
+                  ),
+                )
+                    : Expanded(
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1.0),
+                        child: Image.asset(
+                          'images/botImage.png',
+                          height: 160,
+                          width: 160,
+                        ),
+                      ),
+                      Flexible(
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 10.0),
+                          padding: const EdgeInsets.all(8.0),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Column(
+                            children: [
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    children: messages.map((message) {
+                                      if (message['role'] == 'assistant') {
+                                        return Column(
+                                          children: [
+                                            AssistantMessage(
+                                              messageContent:
+                                              message['content']!,
+                                            ),
+                                            const SizedBox(height: 2),
+                                            // Scrollable row for custom buttons
+                                            SingleChildScrollView(
+                                              scrollDirection:
+                                              Axis.horizontal,
+                                              child: Row(
+                                                children: [
+                                                  CustomButton(
+                                                    title: 'Shopping',
+                                                    onPressed: () {
+                                                      shoppingDialogBox(
+                                                          context);
+                                                    },
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  CustomButton(
+                                                    title: 'Smart House',
+                                                    onPressed: () {
+                                                      smartHouseDialogBox(
+                                                          context);
+                                                    },
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  CustomButton(
+                                                    title: 'Travel Plans',
+                                                    onPressed: () {
+                                                      travelPlanDialogBox(
+                                                          context);
+                                                    },
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  CustomButton(
+                                                    title: 'Your Vehicles',
+                                                    onPressed: () {
+                                                      vehicleDialogBox(
+                                                          context);
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      } else {
+                                        return UserMessage(
+                                          messageContent: message['content']!,
+                                        );
+                                      }
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                              if (isLoading)
+                                const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          if (isRecording) {
+                            stopListeningNow();
+                          } else {
+                            startListeningNow();
+                          }
+                        },
+                        child: Image.asset(
+                          isRecording
+                              ? 'images/recordingLogo.gif'
+                              : 'images/recordingIcon.png',
+                          height: 60,
+                          width: 60,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.camera_alt_rounded),
+                        iconSize: 40,
+                        color: Colors.blueAccent,
+                        onPressed: () async {
+                          if (_isCameraAvailable) {
+                            // Toggle PiP mode if camera is available
+                            setState(() {
+                              _showCamera = !_showCamera;
+                            });
+                          } else {
+                            // If camera is not available, request permission again
+                            await _checkAndRequestPermission();
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete),
+                        iconSize: 40,
+                        color: Colors.redAccent,
+                        onPressed: clear,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_showCamera && _isCameraAvailable)
+            Positioned(
+              left: _cameraPosition.dx,
+              top: _cameraPosition.dy,
+              child: GestureDetector(
+                onPanUpdate: (details) {
+                  setState(() {
+                    _cameraPosition += details.delta; // Update position when dragged
+                  });
+                },
+                child: const SizedBox(
+                  width: 200,
+                  height: 150,
+                  child: PiPCameraScreen(), // Pass the camera screen
+                ),
+              ),
+            ),
+          if (_errorMessage.isNotEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  _errorMessage,
+                  style: const TextStyle(color: Colors.red, fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
