@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:voice_chatbot_assistant/screens/chat_screen.dart';
 import 'package:voice_chatbot_assistant/screens/home_screen.dart';
 import 'package:voice_chatbot_assistant/screens/profile_screen.dart';
-import 'package:voice_chatbot_assistant/screens/tts.dart';
+import 'package:voice_chatbot_assistant/screens/chat_history_screen.dart'; // Add this import
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,9 +22,10 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       initialRoute: '/',
       routes: {
-        '/homeScreen':(context)=>const HomeScreen(),
+        '/homeScreen': (context) => const HomeScreen(),
         '/chatScreen': (context) => const ChatScreen(),
-        '/profile':(context)=> const ProfileScreen(),
+        '/profile': (context) => const ProfileScreen(),
+        '/chatHistory': (context) => const ChatHistoryScreen(), // Add this route
       },
       home: const HomeScreen(),
     );

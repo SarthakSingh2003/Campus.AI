@@ -1,0 +1,2 @@
+C:/Campus.AI/android/app/.cxx/Debug/1p5j6p2f/x86/CMakeFiles/edit_cache.dir
+C:/Campus.AI/android/app/.cxx/Debug/1p5j6p2f/x86/CMakeFiles/rebuild_cache.dir

@@ -1,3 +1,4 @@
+// lib/screens/chat_screen.dart (modified)
 import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -8,21 +9,26 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:translator/translator.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:voice_chatbot_assistant/api_key.dart';
-import 'package:voice_chatbot_assistant/components/custom_button.dart';
 import 'package:voice_chatbot_assistant/components/pip_camera_box.dart';
-import 'package:voice_chatbot_assistant/components/shopping_dialog_box.dart';
-import 'package:voice_chatbot_assistant/components/smart_house_dialog_box.dart';
-import 'package:voice_chatbot_assistant/components/travel_plans_dialog_box.dart';
-import 'package:voice_chatbot_assistant/components/vehicle_dialog_box.dart';
+import 'package:voice_chatbot_assistant/components/assistant_message.dart';
+import 'package:voice_chatbot_assistant/components/user_message.dart';
 import 'package:voice_chatbot_assistant/constant/languages.dart';
 import 'package:voice_chatbot_assistant/constant/messages.dart';
 import 'package:voice_chatbot_assistant/screens/tts.dart';
-import '../components/assistant_message.dart';
-import '../components/user_message.dart';
+import 'package:voice_chatbot_assistant/models/chat_history.dart';
+import 'package:voice_chatbot_assistant/services/chat_history_service.dart';
+import 'package:voice_chatbot_assistant/screens/chat_history_screen.dart';
 import 'dart:async';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final ChatHistory? chatHistory;
+  final bool isFromHistory;
+
+  const ChatScreen({
+    super.key,
+    this.chatHistory,
+    this.isFromHistory = false,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -32,6 +38,8 @@ class _ChatScreenState extends State<ChatScreen> {
   TtsService ttsService = TtsService();
   final SpeechToText speechToTextInstance = SpeechToText();
   final GoogleTranslator translator = GoogleTranslator();
+  final ChatHistoryService _historyService = ChatHistoryService();
+
   String recordedAudioString = "";
   String translatedString = "";
   String detectedLanguage = "";
@@ -41,11 +49,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Offset _cameraPosition = const Offset(100, 100);
   bool _isCameraAvailable = false;
   String _errorMessage = '';
+  TextEditingController _saveHistoryController = TextEditingController();
 
   // Gemini Pro model instance
   late final GenerativeModel model;
 
-  List<Map<String, String>> messages = dummyMessages;
+  List<Map<String, String>> messages = [];
   bool isLoading = false;
   bool isRecording = false;
 
@@ -59,15 +68,28 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Initialize messages from history or use dummy messages
+    if (widget.chatHistory != null && widget.isFromHistory) {
+      messages = List<Map<String, String>>.from(widget.chatHistory!.messages);
+    } else {
+      messages = List.from(dummyMessages);
+    }
+
     // Initialize Gemini model
     model = GenerativeModel(
       model: 'gemini-1.5-pro-002',
       apiKey: geminiApiKey,
     );
+
     initializeSpeechToText();
     initializeTextToSpeech();
     _checkAndRequestPermission();
-    speakDummyMessages();
+
+    // Only speak messages if not from history
+    if (!widget.isFromHistory) {
+      speakDummyMessages();
+    }
   }
 
   void speakDummyMessages() async {
@@ -78,12 +100,13 @@ class _ChatScreenState extends State<ChatScreen> {
         await ttsService.setSpeechRate(
             0.4 + Random().nextDouble() * 5.5); // Adjust speech rate if needed
         await ttsService
-            .setPitch(1.3 + Random().nextDouble() * 0.4); // Adjust pitch
-        await ttsService.setVolume(1.0);
+            .setPitch(2.3 + Random().nextDouble() * 0.4); // Adjust pitch
+        await ttsService.setVolume(2.0);
         await ttsService.speak(message['content']!);
       }
     }
   }
+
   Future<void> _checkAndRequestPermission() async {
     PermissionStatus status = await Permission.camera.status;
 
@@ -98,7 +121,8 @@ class _ChatScreenState extends State<ChatScreen> {
     } else if (status.isPermanentlyDenied) {
       // If permission is permanently denied, show error
       setState(() {
-        _errorMessage = "Camera permission is permanently denied. Please enable it in settings.";
+        _errorMessage =
+            "Camera permission is permanently denied. Please enable it in settings.";
       });
       openAppSettings(); // Direct user to app settings if permission is permanently denied
     } else {
@@ -108,6 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     }
   }
+
   Future<void> _checkCameraAvailability() async {
     try {
       final cameras = await availableCameras(); // Check available cameras
@@ -124,11 +149,13 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       setState(() {
-        _isCameraAvailable = false; // Error handling in case camera access fails
+        _isCameraAvailable =
+            false; // Error handling in case camera access fails
         _errorMessage = 'Failed to access the camera. Please try again.';
       });
     }
   }
+
   // Initialize text-to-speech and log available voices
   void initializeTextToSpeech() async {
     try {
@@ -137,11 +164,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final langSettings = langSetting[selectedLanguageCode];
       // Set the language, speech rate, pitch, and volume for the selected language
       await ttsService.setLanguage(langSettings!);
-      await ttsService.setSpeechRate(
-          0.4 + Random().nextDouble() * 8.5); // Adjust speech rate if needed
-      await ttsService
-          .setPitch(5.3 + Random().nextDouble() * 0.4); // Adjust pitch
-      await ttsService.setVolume(2.0); // Adjust volume
+      await ttsService.setSpeechRate(0.9); // Adjust speech rate if needed
+      await ttsService.setPitch(1.1); // Adjust pitch
+      await ttsService.setVolume(1.0); // Adjust volume
     } catch (e) {
       if (kDebugMode) {
         print("Error initializing text-to-speech: $e");
@@ -158,12 +183,14 @@ class _ChatScreenState extends State<ChatScreen> {
     // Custom hardcoded responses
     if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
       _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
-    } else if (message.contains('sleepless') || message.contains('feeling sleepless')) {
-      _assistantResponse = "Hey, I’ve been observing you...";
+    } else if (message.contains('sleepless') ||
+        message.contains('feeling sleepless')) {
+      _assistantResponse = "Hey, I've been observing you...";
     } else {
       // Gemini API call for dynamic responses
       try {
-        final prompt = "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
+        final prompt =
+            "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
             "Provide practical advice for: $message";
 
         final response = await model.generateContent([Content.text(prompt)]);
@@ -171,7 +198,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (response.text != null && response.text!.isNotEmpty) {
           _assistantResponse = response.text!;
         } else {
-          _assistantResponse = 'Sorry, I couldn’t generate a response.';
+          _assistantResponse = "Sorry, I couldn't generate a response.";
         }
       } catch (e) {
         _assistantResponse = 'Error fetching response. Please try again.';
@@ -313,6 +340,76 @@ class _ChatScreenState extends State<ChatScreen> {
     await ttsService.stop();
   }
 
+  // Show dialog to save current chat as history
+  void _showSaveHistoryDialog() {
+    if (messages.length <= dummyMessages.length) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No conversation to save yet!'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    // Set initial title based on conversation
+    String initialTitle = 'Chat ';
+    if (messages.length > dummyMessages.length) {
+      initialTitle += messages[dummyMessages.length]['content']!
+          .split(' ')
+          .take(3)
+          .join(' ');
+      if (initialTitle.length > 30)
+        initialTitle = initialTitle.substring(0, 30) + '...';
+    }
+    _saveHistoryController.text = initialTitle;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save Conversation'),
+        content: TextField(
+          controller: _saveHistoryController,
+          decoration: const InputDecoration(
+            labelText: 'Chat Title',
+            hintText: 'Enter a title for this conversation',
+          ),
+          maxLength: 50,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              String title = _saveHistoryController.text.trim();
+              if (title.isEmpty) {
+                title = 'Chat ${DateTime.now().toString().substring(0, 16)}';
+              }
+
+              await _historyService.saveChatHistory(
+                title,
+                List<Map<String, String>>.from(messages),
+              );
+
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Conversation saved to history!'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -325,6 +422,26 @@ class _ChatScreenState extends State<ChatScreen> {
             Navigator.pushReplacementNamed(context, '/homeScreen');
           },
         ),
+        actions: [
+          // History button
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatHistoryScreen(),
+                ),
+              );
+            },
+          ),
+          // Save button
+          if (!widget.isFromHistory)
+            IconButton(
+              icon: const Icon(Icons.save),
+              onPressed: _showSaveHistoryDialog,
+            ),
+        ],
         backgroundColor: Colors.white,
       ),
       body: Stack(
@@ -344,106 +461,70 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 messages.isEmpty
                     ? const Center(
-                  child: Text(
-                    'Start a conversation!',
-                    style: TextStyle(fontSize: 18, color: Colors.blue),
-                  ),
-                )
-                    : Expanded(
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 1.0),
-                        child: Image.asset(
-                          'images/botImage.png',
-                          height: 160,
-                          width: 160,
+                        child: Text(
+                          'Start a conversation!',
+                          style: TextStyle(fontSize: 18, color: Colors.blue),
                         ),
-                      ),
-                      Flexible(
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 10.0),
-                          padding: const EdgeInsets.all(8.0),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(
-                            children: [
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  child: Column(
-                                    children: messages.map((message) {
-                                      if (message['role'] == 'assistant') {
-                                        return Column(
-                                          children: [
-                                            AssistantMessage(
-                                              messageContent:
-                                              message['content']!,
-                                            ),
-                                            const SizedBox(height: 2),
-                                            // Scrollable row for custom buttons
-                                            SingleChildScrollView(
-                                              scrollDirection:
-                                              Axis.horizontal,
-                                              child: Row(
+                      )
+                    : Expanded(
+                        child: Column(
+                          children: [
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 1.0),
+                              child: Image.asset(
+                                'images/botImage.png',
+                                height: 160,
+                                width: 160,
+                              ),
+                            ),
+                            Flexible(
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(
+                                    horizontal: 10.0),
+                                padding: const EdgeInsets.all(8.0),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[300],
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      child: SingleChildScrollView(
+                                        child: Column(
+                                          children: messages.map((message) {
+                                            if (message['role'] ==
+                                                'assistant') {
+                                              return Column(
                                                 children: [
-                                                  CustomButton(
-                                                    title: 'Shopping',
-                                                    onPressed: () {
-                                                      shoppingDialogBox(
-                                                          context);
-                                                    },
+                                                  AssistantMessage(
+                                                    messageContent:
+                                                        message['content']!,
                                                   ),
-                                                  const SizedBox(width: 8),
-                                                  CustomButton(
-                                                    title: 'Smart House',
-                                                    onPressed: () {
-                                                      smartHouseDialogBox(
-                                                          context);
-                                                    },
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  CustomButton(
-                                                    title: 'Travel Plans',
-                                                    onPressed: () {
-                                                      travelPlanDialogBox(
-                                                          context);
-                                                    },
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  CustomButton(
-                                                    title: 'Your Vehicles',
-                                                    onPressed: () {
-                                                      vehicleDialogBox(
-                                                          context);
-                                                    },
-                                                  ),
+                                                  const SizedBox(height: 2),
                                                 ],
-                                              ),
-                                            ),
-                                          ],
-                                        );
-                                      } else {
-                                        return UserMessage(
-                                          messageContent: message['content']!,
-                                        );
-                                      }
-                                    }).toList(),
-                                  ),
+                                              );
+                                            } else {
+                                              return UserMessage(
+                                                messageContent:
+                                                    message['content']!,
+                                              );
+                                            }
+                                          }).toList(),
+                                        ),
+                                      ),
+                                    ),
+                                    if (isLoading)
+                                      const Center(
+                                        child: CircularProgressIndicator(),
+                                      ),
+                                  ],
                                 ),
                               ),
-                              if (isLoading)
-                                const Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
                 Padding(
                   padding: const EdgeInsets.only(top: 16.0),
                   child: Row(
@@ -471,12 +552,10 @@ class _ChatScreenState extends State<ChatScreen> {
                         color: Colors.blueAccent,
                         onPressed: () async {
                           if (_isCameraAvailable) {
-                            // Toggle PiP mode if camera is available
                             setState(() {
                               _showCamera = !_showCamera;
                             });
                           } else {
-                            // If camera is not available, request permission again
                             await _checkAndRequestPermission();
                           }
                         },
@@ -500,13 +579,13 @@ class _ChatScreenState extends State<ChatScreen> {
               child: GestureDetector(
                 onPanUpdate: (details) {
                   setState(() {
-                    _cameraPosition += details.delta; // Update position when dragged
+                    _cameraPosition += details.delta;
                   });
                 },
                 child: const SizedBox(
                   width: 200,
                   height: 150,
-                  child: PiPCameraScreen(), // Pass the camera screen
+                  child: PiPCameraScreen(),
                 ),
               ),
             ),

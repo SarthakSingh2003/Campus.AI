@@ -1,0 +1,2 @@
+C:/Campus.AI/android/app/.cxx/RelWithDebInfo/6n4m6q3e/armeabi-v7a/CMakeFiles/edit_cache.dir
+C:/Campus.AI/android/app/.cxx/RelWithDebInfo/6n4m6q3e/armeabi-v7a/CMakeFiles/rebuild_cache.dir
