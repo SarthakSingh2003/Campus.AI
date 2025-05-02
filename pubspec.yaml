@@ -41,7 +41,7 @@ dependencies:
   translator: ^1.0.3+1
   flutter_tts: ^4.0.2
   intl: ^0.20.2
-  uuid: ^3.0.7
+  uuid: ^4.5.1
   shared_preferences: ^2.3.2
   flutter_in_app_pip: ^1.7.4
   camera: ^0.11.0+2
