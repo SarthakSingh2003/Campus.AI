@@ -85,7 +85,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Column(
                 children: [
                   const Text(
-                    'Welcome to My Buddy',
+                    'Welcome to KYC',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,

@@ -1,4 +1,4 @@
-// lib/screens/chat_screen.dart (modified)
+// lib/screens/chat_screen.dart (corrected)
 import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -77,10 +77,17 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     // Initialize Gemini model
-    model = GenerativeModel(
-      model: 'gemini-1.5-pro-002',
-      apiKey: geminiApiKey,
-    );
+    try {
+      model = GenerativeModel(
+        model: 'gemini-2.0-flash-thinking-exp-1219', // Updated model name
+        apiKey: geminiApiKey,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error initializing Gemini model: $e");
+      }
+      errorMessage = "Error initializing AI model. Please restart the app.";
+    }
 
     initializeSpeechToText();
     initializeTextToSpeech();
@@ -160,7 +167,6 @@ class _ChatScreenState extends State<ChatScreen> {
   void initializeTextToSpeech() async {
     try {
       // Get the voice settings for the selected language
-      // Log all available voices
       final langSettings = langSetting[selectedLanguageCode];
       // Set the language, speech rate, pitch, and volume for the selected language
       await ttsService.setLanguage(langSettings!);
@@ -174,128 +180,213 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<bool> _checkConnectivity() async {
+    // Simple connectivity check - you may need to add the connectivity_plus package
+    // For now, we'll just return true to avoid adding a new dependency
+    return true;
+  }
+
   Future<void> getChatResponse(String message) async {
     setState(() {
       isLoading = true;
+      errorMessage = "";
     });
+
+    // Check connectivity before making API call
+    bool hasInternet = await _checkConnectivity();
+    if (!hasInternet) {
+      setState(() {
+        _assistantResponse =
+            "No internet connection. Please check your network and try again.";
+        messages.add({'role': 'assistant', 'content': _assistantResponse});
+        isLoading = false;
+      });
+      await ttsService.speak(_assistantResponse);
+      return;
+    }
+
     initializeTextToSpeech();
 
-    // Custom hardcoded responses
-    if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
-      _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
-    } else if (message.contains('sleepless') ||
-        message.contains('feeling sleepless')) {
-      _assistantResponse = "Hey, I've been observing you...";
-    } else {
-      // Gemini API call for dynamic responses
-      try {
+    // Add timeout to prevent indefinite loading
+    try {
+      // Custom hardcoded responses
+      if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
+        _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
+      } else if (message.contains('sleepless') ||
+          message.contains('feeling sleepless')) {
+        _assistantResponse = "Hey, I've been observing you...";
+      } else {
+        // Gemini API call with timeout
         final prompt =
             "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
             "Provide practical advice for: $message";
 
-        final response = await model.generateContent([Content.text(prompt)]);
+        // Add timeout to prevent indefinite loading
+        final response = await model
+            .generateContent([Content.text(prompt)]).timeout(
+                const Duration(seconds: 15), onTimeout: () {
+          throw TimeoutException('API request timed out');
+        });
 
         if (response.text != null && response.text!.isNotEmpty) {
           _assistantResponse = response.text!;
         } else {
           _assistantResponse = "Sorry, I couldn't generate a response.";
         }
-      } catch (e) {
-        _assistantResponse = 'Error fetching response. Please try again.';
-        if (kDebugMode) {
-          print("Gemini API Error: $e");
+      }
+    } catch (e) {
+      _assistantResponse = 'Error fetching response. Please try again.';
+      if (kDebugMode) {
+        print("Gemini API Error: $e");
+      }
+    } finally {
+      // Ensure loading state is always updated
+      if (mounted) {
+        setState(() {
+          messages.add({'role': 'assistant', 'content': _assistantResponse});
+          isLoading = false;
+        });
+
+        // Only speak if there's content to speak
+        if (_assistantResponse.isNotEmpty) {
+          await ttsService.speak(_assistantResponse);
         }
       }
     }
-
-    setState(() {
-      messages.add({'role': 'assistant', 'content': _assistantResponse});
-      isLoading = false;
-    });
-
-    await ttsService.speak(_assistantResponse);
   }
 
   Future<String> detectLanguage(String text) async {
-    // Translate the text to a known language (e.g., English) to infer the source language
-    var translation = await translator.translate(text, to: 'en');
-    // If the text is not in English, the source language is detected by translation
-    return translation.sourceLanguage
-        .toString(); // This will give you the detected language
+    try {
+      // Translate the text to a known language (e.g., English) to infer the source language
+      var translation = await translator.translate(text, to: 'en');
+      // If the text is not in English, the source language is detected by translation
+      return translation.sourceLanguage
+          .toString(); // This will give you the detected language
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error detecting language: $e");
+      }
+      return 'en'; // Default to English on error
+    }
   }
 
   Future<void> translateText(String text) async {
-    String detectedLanguage = await detectLanguage(text);
-    if (kDebugMode) {
-      print("Detected Language: $detectedLanguage");
+    if (text.trim().isEmpty) {
+      setState(() {
+        errorMessage = "No speech detected. Please try again.";
+        isLoading = false;
+      });
+      return;
     }
-    for (var lang in languages) {
-      if (lang['name']!.toLowerCase() == detectedLanguage.toLowerCase()) {
-        selectedLanguageCode = lang['code']!;
-        break;
-      } else {
-        selectedLanguageCode = 'en';
+
+    try {
+      // First, detect the language
+      String detectedLang = await detectLanguage(text);
+      if (kDebugMode) {
+        print("Detected Language: $detectedLang");
       }
-    }
-    if (kDebugMode) {
-      print("SelectedLanguageCode : $selectedLanguageCode");
-    }
 
-    final translated =
-        await translator.translate(text, from: 'en', to: selectedLanguageCode);
-    setState(() {
-      translatedString = translated.text;
-      messages = List<Map<String, String>>.from(messages);
-      messages.add({'role': 'user', 'content': translatedString});
-    });
+      // Set the language code based on detection
+      bool languageFound = false;
+      for (var lang in languages) {
+        if (lang['name']!.toLowerCase() == detectedLang.toLowerCase()) {
+          selectedLanguageCode = lang['code']!;
+          languageFound = true;
+          break;
+        }
+      }
 
-    await getChatResponse(translatedString.toLowerCase());
+      if (!languageFound) {
+        selectedLanguageCode = 'en'; // Default to English if not found
+      }
+
+      // Update UI with user message immediately
+      setState(() {
+        messages = List<Map<String, String>>.from(messages);
+        messages.add({'role': 'user', 'content': text});
+      });
+
+      // Process the response based on detected language
+      await getChatResponse(text.toLowerCase());
+    } catch (e) {
+      if (kDebugMode) {
+        print("Translation error: $e");
+      }
+      setState(() {
+        errorMessage = "Translation error. Please try again.";
+        isLoading = false;
+      });
+    }
   }
 
   void initializeSpeechToText() async {
-    await speechToTextInstance.initialize();
-    setState(() {});
+    try {
+      bool available = await speechToTextInstance.initialize();
+      if (kDebugMode) {
+        print("Speech to text initialized: $available");
+      }
+      setState(() {});
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error initializing speech to text: $e");
+      }
+    }
   }
 
   void startListeningNow() async {
     FocusScope.of(context).unfocus();
     setState(() {
+      recordedAudioString = ""; // Clear previous recordings
       isRecording = true;
       errorMessage = "";
       _isSilenceDetected = false;
       _silenceTimer?.cancel();
     });
-    await speechToTextInstance.listen(
+
+    try {
+      await speechToTextInstance.listen(
         onResult: onSpeechToTextResult,
-        listenFor: const Duration(seconds: 15), // Adjust duration if necessary
-        pauseFor: const Duration(
-            seconds: 10), // Time to pause if no speech is detected
+        listenFor: const Duration(seconds: 30), // Increased from 15
+        pauseFor: const Duration(seconds: 3), // Reduced from 10
         onSoundLevelChange: (level) {
-          if (kDebugMode) {
+          // Debug logging
+          if (kDebugMode && level > 1) {
             print("Sound level: $level");
           }
-          // Reset the timer every time there's noise (i.e., sound level > threshold)
 
-          if (level > 1) {
-            // Adjust threshold if needed
-            // Sound detected, reset timer
+          // Sound threshold logic improvement
+          if (level > 0.3) {
+            // Lower threshold to be more sensitive
             _silenceTimer?.cancel();
             _isSilenceDetected = false;
           } else if (!_isSilenceDetected) {
-            // If silence has not yet been detected
-            _silenceTimer?.cancel(); // Cancel any previous timer
+            _silenceTimer?.cancel();
             _silenceTimer = Timer(const Duration(seconds: 2), () {
               if (kDebugMode) {
-                print("4 seconds of silence detected, stopping recording...");
+                print("Silence detected, stopping recording...");
               }
-              setState(() {
-                _isSilenceDetected = true; // Mark silence as detected
-                isRecording = false;
-              });
-              stopListeningNow();
+
+              // Only stop if we have some recorded text
+              if (recordedAudioString.isNotEmpty) {
+                setState(() {
+                  _isSilenceDetected = true;
+                  isRecording = false;
+                });
+                stopListeningNow();
+              }
             });
           }
-        });
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print("Speech recognition error: $e");
+      }
+      setState(() {
+        errorMessage = "Failed to start speech recognition";
+        isRecording = false;
+      });
+    }
   }
 
   void stopListeningNow() async {
@@ -305,15 +396,18 @@ class _ChatScreenState extends State<ChatScreen> {
       _isSilenceDetected = true;
       _silenceTimer?.cancel();
     });
+
     if (recordedAudioString.isEmpty) {
       setState(() {
         errorMessage =
             "No speech detected. Please try again."; // Show error if no speech
       });
       Future.delayed(const Duration(seconds: 3), () {
-        setState(() {
-          errorMessage = "";
-        });
+        if (mounted) {
+          setState(() {
+            errorMessage = "";
+          });
+        }
       });
     } else {
       await translateText(recordedAudioString);
@@ -408,6 +502,16 @@ class _ChatScreenState extends State<ChatScreen> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    // Clean up resources
+    _silenceTimer?.cancel();
+    ttsService.stop();
+    speechToTextInstance.stop();
+    _saveHistoryController.dispose();
+    super.dispose();
   }
 
   @override
@@ -517,6 +621,16 @@ class _ChatScreenState extends State<ChatScreen> {
                                     if (isLoading)
                                       const Center(
                                         child: CircularProgressIndicator(),
+                                      ),
+                                    // Add debug info for speech recognition
+                                    if (kDebugMode && isRecording)
+                                      Padding(
+                                        padding: const EdgeInsets.all(8.0),
+                                        child: Text(
+                                          "Recording: $recordedAudioString\nLanguage: $selectedLanguageCode",
+                                          style: const TextStyle(
+                                              fontSize: 12, color: Colors.grey),
+                                        ),
                                       ),
                                   ],
                                 ),
