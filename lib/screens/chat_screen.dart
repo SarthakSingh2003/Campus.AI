@@ -1,5 +1,6 @@
-// lib/screens/chat_screen.dart (corrected)
+// lib/screens/chat_screen.dart (redesigned)
 import 'dart:math';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,8 @@ import 'package:voice_chatbot_assistant/api_key.dart';
 import 'package:voice_chatbot_assistant/components/pip_camera_box.dart';
 import 'package:voice_chatbot_assistant/components/assistant_message.dart';
 import 'package:voice_chatbot_assistant/components/user_message.dart';
+import 'package:voice_chatbot_assistant/components/voice_wave_visualization.dart';
+import 'package:voice_chatbot_assistant/components/voice_ripple_animation.dart';
 import 'package:voice_chatbot_assistant/constant/languages.dart';
 import 'package:voice_chatbot_assistant/constant/messages.dart';
 import 'package:voice_chatbot_assistant/screens/tts.dart';
@@ -19,6 +22,9 @@ import 'package:voice_chatbot_assistant/models/chat_history.dart';
 import 'package:voice_chatbot_assistant/services/chat_history_service.dart';
 import 'package:voice_chatbot_assistant/screens/chat_history_screen.dart';
 import 'dart:async';
+import 'package:provider/provider.dart';
+import 'package:voice_chatbot_assistant/constant/theme_provider.dart';
+import 'package:voice_chatbot_assistant/constant/theme.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatHistory? chatHistory;
@@ -34,7 +40,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   TtsService ttsService = TtsService();
   final SpeechToText speechToTextInstance = SpeechToText();
   final GoogleTranslator translator = GoogleTranslator();
@@ -51,12 +57,24 @@ class _ChatScreenState extends State<ChatScreen> {
   String _errorMessage = '';
   TextEditingController _saveHistoryController = TextEditingController();
 
+  // Animation controllers
+  late AnimationController _titleController;
+  late AnimationController _loadingController;
+  late AnimationController _waveController;
+  late AnimationController _particleController;
+
+  late Animation<double> _titleAnimation;
+  late Animation<double> _loadingAnimation;
+  late Animation<double> _waveAnimation;
+  late Animation<double> _particleAnimation;
+
   // Gemini Pro model instance
   late final GenerativeModel model;
 
   List<Map<String, String>> messages = [];
   bool isLoading = false;
   bool isRecording = false;
+  double currentSoundLevel = 0.0;
 
   String selectedLanguageCode = 'en';
   List<Map<String, String>> languages = language;
@@ -69,6 +87,9 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
 
+    // Initialize animations
+    _initializeAnimations();
+
     // Initialize messages from history or use dummy messages
     if (widget.chatHistory != null && widget.isFromHistory) {
       messages = List<Map<String, String>>.from(widget.chatHistory!.messages);
@@ -79,7 +100,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Initialize Gemini model
     try {
       model = GenerativeModel(
-        model: 'gemini-2.0-flash-thinking-exp-1219', // Updated model name
+        model: 'gemini-2.0-flash-thinking-exp-1219',
         apiKey: geminiApiKey,
       );
     } catch (e) {
@@ -97,82 +118,158 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!widget.isFromHistory) {
       speakDummyMessages();
     }
+
+    // Debug speech recognition status
+    _debugSpeechRecognitionStatus();
+  }
+
+  void _initializeAnimations() {
+    _titleController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
+    _loadingController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
+
+    _waveController = AnimationController(
+      duration: const Duration(seconds: 3),
+      vsync: this,
+    );
+
+    _particleController = AnimationController(
+      duration: const Duration(seconds: 4),
+      vsync: this,
+    );
+
+    _titleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _titleController,
+      curve: Curves.elasticOut,
+    ));
+
+    _loadingAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _loadingController,
+      curve: Curves.easeInOut,
+    ));
+
+    _waveAnimation = Tween<double>(
+      begin: 0.0,
+      end: 2 * pi,
+    ).animate(CurvedAnimation(
+      parent: _waveController,
+      curve: Curves.linear,
+    ));
+
+    _particleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 2 * pi,
+    ).animate(CurvedAnimation(
+      parent: _particleController,
+      curve: Curves.linear,
+    ));
+
+    _startAnimations();
+  }
+
+  void _startAnimations() {
+    _titleController.forward();
+    _loadingController.repeat(reverse: true);
+    _waveController.repeat();
+    _particleController.repeat();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _loadingController.dispose();
+    _waveController.dispose();
+    _particleController.dispose();
+    _silenceTimer?.cancel();
+    ttsService.stop();
+    speechToTextInstance.stop();
+    _saveHistoryController.dispose();
+    super.dispose();
   }
 
   void speakDummyMessages() async {
     for (var message in messages) {
       if (message['role'] == 'assistant') {
         await ttsService.setLanguage('en-IN');
-        // await ttsService.setVoice(voiceSettings['en']!);
-        await ttsService.setSpeechRate(
-            0.4 + Random().nextDouble() * 5.5); // Adjust speech rate if needed
-        await ttsService
-            .setPitch(2.3 + Random().nextDouble() * 0.4); // Adjust pitch
-        await ttsService.setVolume(2.0);
+        await ttsService.setSpeechRate(0.5);
+        await ttsService.setPitch(1.0);
+        await ttsService.setVolume(0.8);
         await ttsService.speak(message['content']!);
       }
     }
   }
 
   Future<void> _checkAndRequestPermission() async {
-    PermissionStatus status = await Permission.camera.status;
-
-    if (status.isDenied) {
-      // Request permission if denied
-      status = await Permission.camera.request();
+    // Check camera permission
+    PermissionStatus cameraStatus = await Permission.camera.status;
+    if (cameraStatus.isDenied) {
+      cameraStatus = await Permission.camera.request();
     }
 
-    if (status.isGranted) {
-      // If permission is granted, check for camera availability
+    // Check microphone permission (important for speech recognition)
+    PermissionStatus microphoneStatus = await Permission.microphone.status;
+    if (microphoneStatus.isDenied) {
+      microphoneStatus = await Permission.microphone.request();
+    }
+
+    if (cameraStatus.isGranted && microphoneStatus.isGranted) {
       _checkCameraAvailability();
-    } else if (status.isPermanentlyDenied) {
-      // If permission is permanently denied, show error
+    } else if (cameraStatus.isPermanentlyDenied ||
+        microphoneStatus.isPermanentlyDenied) {
       setState(() {
         _errorMessage =
-            "Camera permission is permanently denied. Please enable it in settings.";
+            "Camera or microphone permission is permanently denied. Please enable it in settings.";
       });
-      openAppSettings(); // Direct user to app settings if permission is permanently denied
+      openAppSettings();
     } else {
-      // Handle other permission states (denied, restricted, etc.)
       setState(() {
-        _errorMessage = "Camera permission is required to use this feature.";
+        _errorMessage =
+            "Camera and microphone permissions are required to use this feature.";
       });
     }
   }
 
   Future<void> _checkCameraAvailability() async {
     try {
-      final cameras = await availableCameras(); // Check available cameras
+      final cameras = await availableCameras();
       if (cameras.isNotEmpty) {
         setState(() {
-          _isCameraAvailable = true; // Camera is available
-          _errorMessage = ''; // Clear error message if camera is available
+          _isCameraAvailable = true;
+          _errorMessage = '';
         });
       } else {
         setState(() {
-          _isCameraAvailable = false; // No camera available
+          _isCameraAvailable = false;
           _errorMessage = 'No camera available on this device.';
         });
       }
     } catch (e) {
       setState(() {
-        _isCameraAvailable =
-            false; // Error handling in case camera access fails
+        _isCameraAvailable = false;
         _errorMessage = 'Failed to access the camera. Please try again.';
       });
     }
   }
 
-  // Initialize text-to-speech and log available voices
   void initializeTextToSpeech() async {
     try {
-      // Get the voice settings for the selected language
       final langSettings = langSetting[selectedLanguageCode];
-      // Set the language, speech rate, pitch, and volume for the selected language
       await ttsService.setLanguage(langSettings!);
-      await ttsService.setSpeechRate(0.9); // Adjust speech rate if needed
-      await ttsService.setPitch(1.1); // Adjust pitch
-      await ttsService.setVolume(1.0); // Adjust volume
+      await ttsService.setSpeechRate(0.5);
+      await ttsService.setPitch(1.0);
+      await ttsService.setVolume(0.8);
     } catch (e) {
       if (kDebugMode) {
         print("Error initializing text-to-speech: $e");
@@ -181,8 +278,6 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<bool> _checkConnectivity() async {
-    // Simple connectivity check - you may need to add the connectivity_plus package
-    // For now, we'll just return true to avoid adding a new dependency
     return true;
   }
 
@@ -192,7 +287,6 @@ class _ChatScreenState extends State<ChatScreen> {
       errorMessage = "";
     });
 
-    // Check connectivity before making API call
     bool hasInternet = await _checkConnectivity();
     if (!hasInternet) {
       setState(() {
@@ -207,21 +301,39 @@ class _ChatScreenState extends State<ChatScreen> {
 
     initializeTextToSpeech();
 
-    // Add timeout to prevent indefinite loading
     try {
-      // Custom hardcoded responses
+      // Detect if the message is in Hindi
+      bool isHindi = _isHindiText(message);
+
       if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
         _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
       } else if (message.contains('sleepless') ||
           message.contains('feeling sleepless')) {
         _assistantResponse = "Hey, I've been observing you...";
+      } else if (isHindi) {
+        // Handle Hindi responses
+        final prompt =
+            "Respond in Hindi (हिंदी) with a friendly, conversational tone. "
+            "Provide practical advice for: $message. "
+            "Keep the response natural and helpful.";
+
+        final response = await model
+            .generateContent([Content.text(prompt)]).timeout(
+                const Duration(seconds: 15), onTimeout: () {
+          throw TimeoutException('API request timed out');
+        });
+
+        if (response.text != null && response.text!.isNotEmpty) {
+          _assistantResponse = response.text!;
+        } else {
+          _assistantResponse =
+              "माफ़ करें, मैं उत्तर नहीं दे पाया। कृपया फिर से कोशिश करें।";
+        }
       } else {
-        // Gemini API call with timeout
         final prompt =
             "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
             "Provide practical advice for: $message";
 
-        // Add timeout to prevent indefinite loading
         final response = await model
             .generateContent([Content.text(prompt)]).timeout(
                 const Duration(seconds: 15), onTimeout: () {
@@ -240,14 +352,12 @@ class _ChatScreenState extends State<ChatScreen> {
         print("Gemini API Error: $e");
       }
     } finally {
-      // Ensure loading state is always updated
       if (mounted) {
         setState(() {
           messages.add({'role': 'assistant', 'content': _assistantResponse});
           isLoading = false;
         });
 
-        // Only speak if there's content to speak
         if (_assistantResponse.isNotEmpty) {
           await ttsService.speak(_assistantResponse);
         }
@@ -255,18 +365,22 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // Helper method to detect Hindi text
+  bool _isHindiText(String text) {
+    // Check for Hindi characters (Devanagari script)
+    RegExp hindiRegex = RegExp(r'[\u0900-\u097F]');
+    return hindiRegex.hasMatch(text);
+  }
+
   Future<String> detectLanguage(String text) async {
     try {
-      // Translate the text to a known language (e.g., English) to infer the source language
       var translation = await translator.translate(text, to: 'en');
-      // If the text is not in English, the source language is detected by translation
-      return translation.sourceLanguage
-          .toString(); // This will give you the detected language
+      return translation.sourceLanguage.toString();
     } catch (e) {
       if (kDebugMode) {
         print("Error detecting language: $e");
       }
-      return 'en'; // Default to English on error
+      return 'en';
     }
   }
 
@@ -280,13 +394,22 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      // First, detect the language
+      // Check if text is in Hindi first
+      if (_isHindiText(text)) {
+        selectedLanguageCode = 'hi';
+        setState(() {
+          messages = List<Map<String, String>>.from(messages);
+          messages.add({'role': 'user', 'content': text});
+        });
+        await getChatResponse(text.toLowerCase());
+        return;
+      }
+
       String detectedLang = await detectLanguage(text);
       if (kDebugMode) {
         print("Detected Language: $detectedLang");
       }
 
-      // Set the language code based on detection
       bool languageFound = false;
       for (var lang in languages) {
         if (lang['name']!.toLowerCase() == detectedLang.toLowerCase()) {
@@ -297,16 +420,14 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       if (!languageFound) {
-        selectedLanguageCode = 'en'; // Default to English if not found
+        selectedLanguageCode = 'en';
       }
 
-      // Update UI with user message immediately
       setState(() {
         messages = List<Map<String, String>>.from(messages);
         messages.add({'role': 'user', 'content': text});
       });
 
-      // Process the response based on detected language
       await getChatResponse(text.toLowerCase());
     } catch (e) {
       if (kDebugMode) {
@@ -321,22 +442,73 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void initializeSpeechToText() async {
     try {
-      bool available = await speechToTextInstance.initialize();
+      bool available = await speechToTextInstance.initialize(
+        onError: (error) {
+          if (kDebugMode) {
+            print("Speech recognition error: $error");
+          }
+          setState(() {
+            errorMessage = "Speech recognition error: ${error.errorMsg}";
+          });
+        },
+        onStatus: (status) {
+          if (kDebugMode) {
+            print("Speech recognition status: $status");
+          }
+        },
+      );
+
       if (kDebugMode) {
         print("Speech to text initialized: $available");
       }
+
+      if (!available) {
+        setState(() {
+          errorMessage = "Speech recognition not available on this device";
+        });
+      }
+
       setState(() {});
     } catch (e) {
       if (kDebugMode) {
         print("Error initializing speech to text: $e");
       }
+      setState(() {
+        errorMessage = "Failed to initialize speech recognition";
+      });
     }
   }
 
   void startListeningNow() async {
     FocusScope.of(context).unfocus();
+
+    // Check if speech recognition is available
+    if (!speechToTextInstance.isAvailable) {
+      setState(() {
+        errorMessage =
+            "Speech recognition not available. Please restart the app.";
+        isRecording = false;
+      });
+      return;
+    }
+
+    // Check microphone permission
+    PermissionStatus microphoneStatus = await Permission.microphone.status;
+    if (microphoneStatus.isDenied) {
+      microphoneStatus = await Permission.microphone.request();
+    }
+
+    if (!microphoneStatus.isGranted) {
+      setState(() {
+        errorMessage =
+            "Microphone permission is required for speech recognition.";
+        isRecording = false;
+      });
+      return;
+    }
+
     setState(() {
-      recordedAudioString = ""; // Clear previous recordings
+      recordedAudioString = "";
       isRecording = true;
       errorMessage = "";
       _isSilenceDetected = false;
@@ -346,27 +518,32 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await speechToTextInstance.listen(
         onResult: onSpeechToTextResult,
-        listenFor: const Duration(seconds: 30), // Increased from 15
-        pauseFor: const Duration(seconds: 3), // Reduced from 10
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        partialResults: true,
+        cancelOnError: false,
+        listenMode: ListenMode.confirmation,
         onSoundLevelChange: (level) {
-          // Debug logging
+          setState(() {
+            currentSoundLevel = level.clamp(0.0, 1.0);
+          });
+
           if (kDebugMode && level > 1) {
             print("Sound level: $level");
           }
 
-          // Sound threshold logic improvement
-          if (level > 0.3) {
-            // Lower threshold to be more sensitive
+          if (level > 0.2) {
+            // Lowered threshold for better sensitivity
             _silenceTimer?.cancel();
             _isSilenceDetected = false;
           } else if (!_isSilenceDetected) {
             _silenceTimer?.cancel();
-            _silenceTimer = Timer(const Duration(seconds: 2), () {
+            _silenceTimer = Timer(const Duration(seconds: 3), () {
+              // Increased silence detection time
               if (kDebugMode) {
                 print("Silence detected, stopping recording...");
               }
 
-              // Only stop if we have some recorded text
               if (recordedAudioString.isNotEmpty) {
                 setState(() {
                   _isSilenceDetected = true;
@@ -383,7 +560,7 @@ class _ChatScreenState extends State<ChatScreen> {
         print("Speech recognition error: $e");
       }
       setState(() {
-        errorMessage = "Failed to start speech recognition";
+        errorMessage = "Failed to start speech recognition. Please try again.";
         isRecording = false;
       });
     }
@@ -395,12 +572,12 @@ class _ChatScreenState extends State<ChatScreen> {
       isRecording = false;
       _isSilenceDetected = true;
       _silenceTimer?.cancel();
+      currentSoundLevel = 0.0;
     });
 
     if (recordedAudioString.isEmpty) {
       setState(() {
-        errorMessage =
-            "No speech detected. Please try again."; // Show error if no speech
+        errorMessage = "No speech detected. Please try again.";
       });
       Future.delayed(const Duration(seconds: 3), () {
         if (mounted) {
@@ -421,8 +598,20 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       recordedAudioString = recognitionResult.recognizedWords;
     });
+
     if (kDebugMode) {
       print("Speech Result: $recordedAudioString");
+      print("Final: ${recognitionResult.finalResult}");
+    }
+
+    // If we have a final result and it's not empty, process it
+    if (recognitionResult.finalResult && recordedAudioString.isNotEmpty) {
+      // Small delay to ensure the result is fully processed
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && isRecording) {
+          stopListeningNow();
+        }
+      });
     }
   }
 
@@ -434,7 +623,6 @@ class _ChatScreenState extends State<ChatScreen> {
     await ttsService.stop();
   }
 
-  // Show dialog to save current chat as history
   void _showSaveHistoryDialog() {
     if (messages.length <= dummyMessages.length) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -446,7 +634,6 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // Set initial title based on conversation
     String initialTitle = 'Chat ';
     if (messages.length > dummyMessages.length) {
       initialTitle += messages[dummyMessages.length]['content']!
@@ -504,218 +691,756 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  @override
-  void dispose() {
-    // Clean up resources
-    _silenceTimer?.cancel();
-    ttsService.stop();
-    speechToTextInstance.stop();
-    _saveHistoryController.dispose();
-    super.dispose();
+  void _debugSpeechRecognitionStatus() async {
+    // Check speech recognition status after a delay
+    Future.delayed(const Duration(seconds: 2), () async {
+      if (kDebugMode) {
+        print(
+            "Speech recognition available: ${speechToTextInstance.isAvailable}");
+        print(
+            "Speech recognition listening: ${speechToTextInstance.isListening}");
+
+        // Check permissions
+        PermissionStatus microphoneStatus = await Permission.microphone.status;
+        print("Microphone permission: $microphoneStatus");
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final appTheme = themeProvider.currentTheme;
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text("Chat"),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            Navigator.pushReplacementNamed(context, '/homeScreen');
-          },
-        ),
-        actions: [
-          // History button
-          IconButton(
-            icon: const Icon(Icons.history),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ChatHistoryScreen(),
-                ),
-              );
-            },
-          ),
-          // Save button
-          if (!widget.isFromHistory)
-            IconButton(
-              icon: const Icon(Icons.save),
-              onPressed: _showSaveHistoryDialog,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: appTheme.buttonColor,
+        child: const Icon(Icons.color_lens, color: Colors.white),
+        onPressed: () async {
+          // Show theme switcher dialog
+          final selected = await showDialog<ThemeType>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Choose Theme'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: AppThemes.all
+                    .map((theme) => ListTile(
+                          leading: Icon(
+                            theme.type == ThemeType.universe
+                                ? Icons.public
+                                : theme.type == ThemeType.rainbow
+                                    ? Icons.gradient
+                                    : Icons.blur_on,
+                            color: theme.primary,
+                          ),
+                          title: Text(theme.name),
+                          trailing: themeProvider.currentType == theme.type
+                              ? const Icon(Icons.check, color: Colors.green)
+                              : null,
+                          onTap: () => Navigator.pop(context, theme.type),
+                        ))
+                    .toList(),
+              ),
             ),
-        ],
-        backgroundColor: Colors.white,
+          );
+          if (selected != null) {
+            themeProvider.setTheme(selected);
+          }
+        },
       ),
-      body: Stack(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                if (errorMessage.isNotEmpty) // Show error if exists
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Text(
-                      errorMessage,
-                      style: const TextStyle(color: Colors.red, fontSize: 16),
-                    ),
-                  ),
-                messages.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'Start a conversation!',
-                          style: TextStyle(fontSize: 18, color: Colors.blue),
-                        ),
-                      )
-                    : Expanded(
-                        child: Column(
-                          children: [
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 1.0),
-                              child: Image.asset(
-                                'images/botImage.png',
-                                height: 160,
-                                width: 160,
-                              ),
-                            ),
-                            Flexible(
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(
-                                    horizontal: 10.0),
-                                padding: const EdgeInsets.all(8.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[300],
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Expanded(
-                                      child: SingleChildScrollView(
-                                        child: Column(
-                                          children: messages.map((message) {
-                                            if (message['role'] ==
-                                                'assistant') {
-                                              return Column(
-                                                children: [
-                                                  AssistantMessage(
-                                                    messageContent:
-                                                        message['content']!,
-                                                  ),
-                                                  const SizedBox(height: 2),
-                                                ],
-                                              );
-                                            } else {
-                                              return UserMessage(
-                                                messageContent:
-                                                    message['content']!,
-                                              );
-                                            }
-                                          }).toList(),
-                                        ),
-                                      ),
-                                    ),
-                                    if (isLoading)
-                                      const Center(
-                                        child: CircularProgressIndicator(),
-                                      ),
-                                    // Add debug info for speech recognition
-                                    if (kDebugMode && isRecording)
-                                      Padding(
-                                        padding: const EdgeInsets.all(8.0),
-                                        child: Text(
-                                          "Recording: $recordedAudioString\nLanguage: $selectedLanguageCode",
-                                          style: const TextStyle(
-                                              fontSize: 12, color: Colors.grey),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: appTheme.gradient,
+          ),
+        ),
+        child: Stack(
+          children: [
+            // Universe elements
+            if (appTheme.showSpaceElements) ...[
+              ...List.generate(40, (index) {
+                return AnimatedBuilder(
+                  animation: _particleController,
+                  builder: (context, child) {
+                    final starX = (index * 37) % screenWidth;
+                    final starY = (index * 73) % screenHeight;
+                    final starSize = (1.5 + (index % 4) * 1.2).clamp(0.5, 20.0);
+                    final rawOpacity = 0.5 +
+                        (sin(_particleAnimation.value + index) + 1) * 0.35;
+                    final starOpacity = rawOpacity.clamp(0.0, 1.0);
+                    return Positioned(
+                      left: starX,
+                      top: starY,
+                      child: Container(
+                        width: starSize,
+                        height: starSize,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(starOpacity),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.white.withOpacity(
+                                  (starOpacity * 0.7).clamp(0.0, 1.0)),
+                              blurRadius: 6,
+                              spreadRadius: 2,
                             ),
                           ],
                         ),
                       ),
-                Padding(
-                  padding: const EdgeInsets.only(top: 16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          if (isRecording) {
-                            stopListeningNow();
-                          } else {
-                            startListeningNow();
-                          }
-                        },
-                        child: Image.asset(
-                          isRecording
-                              ? 'images/recordingLogo.gif'
-                              : 'images/recordingIcon.png',
-                          height: 60,
-                          width: 60,
+                    );
+                  },
+                );
+              }),
+              ...List.generate(3, (index) {
+                return AnimatedBuilder(
+                  animation: _particleController,
+                  builder: (context, child) {
+                    final starX = (index * screenWidth / 3) + 60;
+                    final starY = (index * screenHeight / 3) + 120;
+                    final twinkle =
+                        (0.7 + 0.3 * sin(_particleAnimation.value + index * 2))
+                            .clamp(0.1, 2.0);
+                    return Positioned(
+                      left: starX,
+                      top: starY,
+                      child: Container(
+                        width: 16 * twinkle,
+                        height: 16 * twinkle,
+                        decoration: BoxDecoration(
+                          color: Colors.white
+                              .withOpacity((0.8 * twinkle).clamp(0.0, 1.0)),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.white
+                                  .withOpacity((0.7 * twinkle).clamp(0.0, 1.0)),
+                              blurRadius: 20,
+                              spreadRadius: 8,
+                            ),
+                          ],
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.camera_alt_rounded),
-                        iconSize: 40,
-                        color: Colors.blueAccent,
-                        onPressed: () async {
-                          if (_isCameraAvailable) {
-                            setState(() {
-                              _showCamera = !_showCamera;
-                            });
-                          } else {
-                            await _checkAndRequestPermission();
-                          }
-                        },
+                    );
+                  },
+                );
+              }),
+              ...List.generate(3, (index) {
+                return AnimatedBuilder(
+                  animation: _waveController,
+                  builder: (context, child) {
+                    final lerpColor = Color.lerp(
+                          [
+                            const Color(0xFF4F46E5),
+                            const Color(0xFF7C3AED),
+                            const Color(0xFFEC4899)
+                          ][index],
+                          Colors.white,
+                          (0.2 + 0.3 * sin(_waveAnimation.value + index))
+                              .clamp(0.0, 1.0),
+                        ) ??
+                        Colors.white;
+                    return Positioned(
+                      left: (index * screenWidth / 3) +
+                          (sin(_waveAnimation.value + index) * 50),
+                      top: (index * 100) +
+                          (cos(_waveAnimation.value + index) * 30),
+                      child: Container(
+                        width: 260,
+                        height: 180,
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            colors: [
+                              lerpColor.withOpacity(0.22),
+                              Colors.transparent,
+                            ],
+                          ),
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        iconSize: 40,
-                        color: Colors.redAccent,
-                        onPressed: clear,
+                    );
+                  },
+                );
+              }),
+            ],
+            // Rainbow elements
+            if (appTheme.showRainbowElements) ...[
+              // Animated rainbow background waves
+              ...List.generate(5, (index) {
+                return AnimatedBuilder(
+                  animation: _waveController,
+                  builder: (context, child) {
+                    return Positioned(
+                      left: 0,
+                      top: screenHeight * 0.2 * index,
+                      child: Container(
+                        width: screenWidth,
+                        height: screenHeight * 0.2,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.primaries[
+                                  (index * 2) % Colors.primaries.length],
+                              Colors.primaries[
+                                  (index * 2 + 1) % Colors.primaries.length],
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(40),
+                        ),
                       ),
-                    ],
+                    );
+                  },
+                );
+              }),
+            ],
+            // Main content
+            SafeArea(
+              child: Column(
+                children: [
+                  // Top bar with space theme
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Back button with space theme
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(25),
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.2),
+                              width: 1,
+                            ),
+                          ),
+                          child: IconButton(
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ),
+
+                        // Title with space theme
+                        AnimatedBuilder(
+                          animation: _titleAnimation,
+                          builder: (context, child) {
+                            return Transform.scale(
+                              scale: _titleAnimation.value,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 10),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.white.withOpacity(0.2),
+                                      Colors.white.withOpacity(0.1),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.3),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: const Text(
+                                  'KYC Universe',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    letterSpacing: 2,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Action buttons with space theme
+                        Row(
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(25),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.2),
+                                  width: 1,
+                                ),
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.history,
+                                    color: Colors.white),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ChatHistoryScreen(),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            if (!widget.isFromHistory) ...[
+                              const SizedBox(width: 10),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(25),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: IconButton(
+                                  icon: const Icon(Icons.save,
+                                      color: Colors.white),
+                                  onPressed: _showSaveHistoryDialog,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Error message with space theme
+                  if (errorMessage.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.red.withOpacity(0.1),
+                            blurRadius: 10,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        errorMessage,
+                        style: const TextStyle(color: Colors.red, fontSize: 14),
+                      ),
+                    ),
+
+                  // Main chat area with space theme
+                  Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(25),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.1),
+                          width: 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 20,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(25),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            child: messages.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        // Animated space-themed KYC text
+                                        AnimatedBuilder(
+                                          animation: _loadingAnimation,
+                                          builder: (context, child) {
+                                            return Transform.scale(
+                                              scale: 1.0 +
+                                                  (_loadingAnimation.value *
+                                                      0.1),
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.all(30),
+                                                decoration: BoxDecoration(
+                                                  gradient: RadialGradient(
+                                                    colors: [
+                                                      Colors.white
+                                                          .withOpacity(0.1),
+                                                      Colors.transparent,
+                                                    ],
+                                                  ),
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: const Text(
+                                                  'KYC',
+                                                  style: TextStyle(
+                                                    fontSize: 48,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white,
+                                                    letterSpacing: 8,
+                                                    shadows: [
+                                                      Shadow(
+                                                        offset: Offset(2, 2),
+                                                        blurRadius: 10,
+                                                        color: Colors.black26,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+
+                                        const SizedBox(height: 20),
+
+                                        const Text(
+                                          'Explore the Universe of Knowledge!',
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.white70,
+                                            fontWeight: FontWeight.w300,
+                                            letterSpacing: 1,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : Column(
+                                    children: [
+                                      // Messages list
+                                      Expanded(
+                                        child: ListView.builder(
+                                          padding: const EdgeInsets.all(16),
+                                          itemCount: messages.length,
+                                          itemBuilder: (context, index) {
+                                            final message = messages[index];
+                                            if (message['role'] ==
+                                                'assistant') {
+                                              return Padding(
+                                                padding: const EdgeInsets.only(
+                                                    bottom: 12),
+                                                child: AssistantMessage(
+                                                  messageContent:
+                                                      message['content']!,
+                                                ),
+                                              );
+                                            } else {
+                                              return Padding(
+                                                padding: const EdgeInsets.only(
+                                                    bottom: 12),
+                                                child: UserMessage(
+                                                  messageContent:
+                                                      message['content']!,
+                                                ),
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ),
+
+                                      // Loading indicator with space theme
+                                      if (isLoading)
+                                        Container(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Row(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                          Color>(
+                                                    Colors.white
+                                                        .withOpacity(0.7),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 15),
+                                              const Text(
+                                                'AI is exploring the cosmos...',
+                                                style: TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom controls with animated space theme
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        // Animated voice button
+                        AnimatedBuilder(
+                          animation: _waveController,
+                          builder: (context, child) {
+                            return Transform.scale(
+                              scale: isRecording ? 1.1 : 1.0,
+                              child: GestureDetector(
+                                onTap: () {
+                                  if (isRecording) {
+                                    stopListeningNow();
+                                  } else {
+                                    startListeningNow();
+                                  }
+                                },
+                                child: Container(
+                                  width: 70,
+                                  height: 70,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: isRecording
+                                          ? [
+                                              const Color(0xFF4F46E5),
+                                              const Color(0xFF7C3AED),
+                                            ]
+                                          : [
+                                              Colors.white.withOpacity(0.1),
+                                              Colors.white.withOpacity(0.05),
+                                            ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(35),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.3),
+                                      width: 2,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: isRecording
+                                            ? const Color(0xFF4F46E5)
+                                                .withOpacity(0.5)
+                                            : Colors.white.withOpacity(0.1),
+                                        blurRadius: 15,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Icon(
+                                    isRecording ? Icons.stop : Icons.mic,
+                                    color: Colors.white,
+                                    size: 30,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Animated camera button
+                        AnimatedBuilder(
+                          animation: _particleController,
+                          builder: (context, child) {
+                            return Transform.rotate(
+                              angle: sin(_particleAnimation.value) * 0.1,
+                              child: Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.white.withOpacity(0.1),
+                                      Colors.white.withOpacity(0.05),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(35),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.3),
+                                    width: 2,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.white.withOpacity(0.1),
+                                      blurRadius: 15,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: IconButton(
+                                  icon: const Icon(Icons.camera_alt_rounded,
+                                      color: Colors.white),
+                                  iconSize: 30,
+                                  onPressed: () async {
+                                    if (_isCameraAvailable) {
+                                      setState(() {
+                                        _showCamera = !_showCamera;
+                                      });
+                                    } else {
+                                      await _checkAndRequestPermission();
+                                    }
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        // Animated delete button
+                        AnimatedBuilder(
+                          animation: _loadingController,
+                          builder: (context, child) {
+                            return Transform.scale(
+                              scale: 1.0 + (_loadingAnimation.value * 0.05),
+                              child: Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.red.withOpacity(0.2),
+                                      Colors.red.withOpacity(0.1),
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(35),
+                                  border: Border.all(
+                                    color: Colors.red.withOpacity(0.3),
+                                    width: 2,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.red.withOpacity(0.2),
+                                      blurRadius: 15,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: IconButton(
+                                  icon: const Icon(Icons.delete,
+                                      color: Colors.white),
+                                  iconSize: 30,
+                                  onPressed: clear,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // PiP Camera
+            if (_showCamera && _isCameraAvailable)
+              Positioned(
+                left: _cameraPosition.dx,
+                top: _cameraPosition.dy,
+                child: GestureDetector(
+                  onPanUpdate: (details) {
+                    setState(() {
+                      _cameraPosition += details.delta;
+                    });
+                  },
+                  child: Container(
+                    width: 200,
+                    height: 150,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(13),
+                      child: const PiPCameraScreen(),
+                    ),
                   ),
                 ),
-              ],
-            ),
-          ),
-          if (_showCamera && _isCameraAvailable)
-            Positioned(
-              left: _cameraPosition.dx,
-              top: _cameraPosition.dy,
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  setState(() {
-                    _cameraPosition += details.delta;
-                  });
-                },
-                child: const SizedBox(
-                  width: 200,
-                  height: 150,
-                  child: PiPCameraScreen(),
+              ),
+
+            // Voice Ripple Animation (displayed on screen when recording)
+            if (isRecording)
+              Positioned.fill(
+                child: Center(
+                  child: VoiceRippleAnimation(
+                    soundLevel: currentSoundLevel,
+                    isActive: isRecording,
+                    size: 300,
+                    primaryColor: const Color(0xFF4F46E5),
+                    secondaryColor: const Color.fromARGB(255, 166, 114, 255),
+                  ),
                 ),
               ),
-            ),
-          if (_errorMessage.isNotEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  _errorMessage,
-                  style: const TextStyle(color: Colors.red, fontSize: 18),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
+}
+
+// Wave painter for animated background
+class WavePainter extends CustomPainter {
+  final Animation<double> animation;
+  final double waveHeight;
+  final Color waveColor;
+  final double waveSpeed;
+
+  WavePainter({
+    required this.animation,
+    required this.waveHeight,
+    required this.waveColor,
+    required this.waveSpeed,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = waveColor
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    final y = size.height * 0.5;
+    path.moveTo(0, y);
+
+    for (double x = 0; x <= size.width; x++) {
+      path.lineTo(
+        x,
+        y +
+            sin((x / size.width * 2 * pi) + (animation.value * waveSpeed)) *
+                waveHeight,
+      );
+    }
+
+    path.lineTo(size.width, size.height);
+    path.lineTo(0, size.height);
+    path.close();
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(WavePainter oldDelegate) => true;
 }
