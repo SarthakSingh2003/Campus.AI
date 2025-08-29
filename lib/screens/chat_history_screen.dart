@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:voice_chatbot_assistant/models/chat_history.dart';
-import 'package:voice_chatbot_assistant/services/chat_history_service.dart';
-import 'package:voice_chatbot_assistant/screens/chat_screen.dart';
+import 'package:kira_college_ai/models/chat_history.dart';
+import 'package:kira_college_ai/services/chat_history_service.dart';
+import 'package:kira_college_ai/screens/chat_screen.dart';
+import 'package:kira_college_ai/services/auth_service.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import 'dart:math' as math;
 
 class ChatHistoryScreen extends StatefulWidget {
@@ -175,21 +178,41 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen>
                             builder: (context, child) {
                               return Transform.scale(
                                 scale: _titleAnimation.value,
-                                child: const Text(
-                                  'KYC',
-                                  style: TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    letterSpacing: 4,
-                                    shadows: [
-                                      Shadow(
-                                        offset: Offset(2, 2),
-                                        blurRadius: 10,
-                                        color: Colors.black26,
+                                child: Column(
+                                  children: [
+                                    const Text(
+                                      'Chat',
+                                      style: TextStyle(
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                        letterSpacing: 4,
+                                        shadows: [
+                                          Shadow(
+                                            offset: Offset(2, 2),
+                                            blurRadius: 10,
+                                            color: Colors.black26,
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    Builder(
+                                      builder: (context) {
+                                        final auth = context.watch<AuthService>();
+                                        if (auth.currentUser?.displayName != null) {
+                                          return Text(
+                                            'Welcome back, ${auth.currentUser!.displayName}!',
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              color: Colors.white70,
+                                              fontWeight: FontWeight.w300,
+                                            ),
+                                          );
+                                        }
+                                        return const SizedBox.shrink();
+                                      },
+                                    ),
+                                  ],
                                 ),
                               );
                             },
@@ -321,13 +344,27 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen>
                                                     fontSize: 16,
                                                   ),
                                                 ),
-                                                subtitle: Text(
-                                                  '${history.messages.length} messages',
-                                                  style: TextStyle(
-                                                    color: Colors.white
-                                                        .withOpacity(0.7),
-                                                    fontSize: 14,
-                                                  ),
+                                                subtitle: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      '${history.messages.length} messages',
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withOpacity(0.7),
+                                                        fontSize: 14,
+                                                      ),
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    Text(
+                                                      DateFormat('MMM dd, yyyy • hh:mm a').format(history.timestamp),
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withOpacity(0.5),
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                                 trailing: Row(
                                                   mainAxisSize:

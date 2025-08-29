@@ -1,24 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'package:voice_chatbot_assistant/constant/theme_provider.dart';
-import 'package:voice_chatbot_assistant/constant/theme.dart';
-import 'package:voice_chatbot_assistant/screens/chat_screen.dart';
-import 'package:voice_chatbot_assistant/screens/home_screen.dart';
-import 'package:voice_chatbot_assistant/screens/profile_screen.dart';
-import 'package:voice_chatbot_assistant/screens/chat_history_screen.dart';
-import 'package:voice_chatbot_assistant/screens/onboarding_ask_screen.dart';
-import 'package:voice_chatbot_assistant/screens/onboarding_learn_screen.dart';
-import 'package:voice_chatbot_assistant/screens/onboarding_connect_screen.dart';
-import 'package:voice_chatbot_assistant/services/onboarding_service.dart';
+import 'package:kira_college_ai/constant/theme_provider.dart';
+import 'package:kira_college_ai/constant/theme.dart';
+import 'package:kira_college_ai/screens/chat_screen.dart';
+// Removed HomeScreen, route directly to ChatScreen after auth
+import 'package:kira_college_ai/screens/profile_screen.dart';
+import 'package:kira_college_ai/screens/chat_history_screen.dart';
+// Removed onboarding screens
+import 'package:kira_college_ai/services/auth_service.dart';
+import 'package:kira_college_ai/screens/login_screen.dart';
+import 'package:kira_college_ai/screens/signup_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) => ThemeProvider(),
-      child: const MyApp(),
-    ),
-  );
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {
+    // Allow app to start even if Firebase isn't configured yet
+  }
+  runApp(MultiProvider(providers: [
+    ChangeNotifierProvider(create: (_) => ThemeProvider()),
+    ChangeNotifierProvider(create: (_) => AuthService()),
+  ], child: const MyApp()));
 }
 
 class MyApp extends StatelessWidget {
@@ -28,7 +32,7 @@ class MyApp extends StatelessWidget {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final appTheme = themeProvider.currentTheme;
     return MaterialApp(
-      title: 'KYC - Know Your College',
+      title: 'KIRA - UIT Prayagraj AI Assistant',
       theme: ThemeData(
         brightness: appTheme.brightness,
         scaffoldBackgroundColor: appTheme.background,
@@ -44,112 +48,16 @@ class MyApp extends StatelessWidget {
             ),
       ),
       debugShowCheckedModeBanner: false,
-      home: const SplashScreen(),
+      home: const LoginScreen(),
       routes: {
-        '/onboardingAsk': (context) => const OnboardingAskScreen(),
-        '/onboardingLearn': (context) => const OnboardingLearnScreen(),
-        '/onboardingConnect': (context) => const OnboardingConnectScreen(),
-        '/homeScreen': (context) => const HomeScreen(),
         '/chatScreen': (context) => const ChatScreen(),
         '/profile': (context) => const ProfileScreen(),
         '/chatHistory': (context) => const ChatHistoryScreen(),
+        '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignupScreen(),
       },
     );
   }
 }
 
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _checkOnboardingStatus();
-  }
-
-  Future<void> _checkOnboardingStatus() async {
-    // Add a small delay for splash screen effect
-    await Future.delayed(const Duration(seconds: 2));
-
-    if (mounted) {
-      // Always show onboarding screens
-      final isCompleted = await OnboardingService.forceShowOnboarding();
-
-      if (isCompleted) {
-        Navigator.pushReplacementNamed(context, '/homeScreen');
-      } else {
-        Navigator.pushReplacementNamed(context, '/onboardingAsk');
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF4F46E5),
-              Color(0xFF7C3AED),
-              Color(0xFFEC4899),
-              Color(0xFFF59E0B),
-            ],
-            stops: [0.0, 0.3, 0.7, 1.0],
-          ),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Image.asset(
-                'images/botImage.png',
-                width: 200,
-                height: 200,
-                fit: BoxFit.contain,
-              ),
-              const SizedBox(height: 30),
-              const Text(
-                'KYC',
-                style: TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  letterSpacing: 8,
-                  shadows: [
-                    Shadow(
-                      offset: Offset(2, 2),
-                      blurRadius: 10,
-                      color: Colors.black26,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Know Your College',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 50),
-              const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+// SplashScreen removed; app starts at LoginScreen.

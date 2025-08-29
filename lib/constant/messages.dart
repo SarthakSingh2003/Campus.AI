@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 List<Map<String, String>> dummyMessages = [
-  {'role': 'assistant', 'content': 'How may I help you?'}
+  {'role': 'assistant', 'content': 'Hello! I\'m KIRA, your AI assistant for United Institute of Technology Prayagraj. How may I help you today?'}
 ];
 
 void updateMessage(String name) {
@@ -25,7 +25,7 @@ void updateMessage(String name) {
   dummyMessages = [
     {
       'role': 'assistant',
-      'content': '$greeting $formattedName! how can I assist you today?'
+      'content': '$greeting $formattedName! I\'m KIRA, your AI assistant for United Institute of Technology Prayagraj. How can I assist you today?'
     }
   ];
 }

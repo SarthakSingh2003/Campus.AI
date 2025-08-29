@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:voice_chatbot_assistant/constant/messages.dart';
+import 'package:kira_college_ai/constant/messages.dart';
+import 'package:kira_college_ai/services/auth_service.dart';
+import 'package:kira_college_ai/services/chat_history_service.dart';
+import 'package:provider/provider.dart';
+import 'package:kira_college_ai/constant/universe_background.dart';
 import 'dart:math' as math;
 
 class ProfileScreen extends StatefulWidget {
@@ -13,11 +17,8 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen>
     with TickerProviderStateMixin {
-  final TextEditingController _nameController = TextEditingController();
   late String _currentTime;
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  bool _isNameValid = true;
-  String? _storedName;
 
   // Animation controllers
   late AnimationController _titleController;
@@ -38,7 +39,6 @@ class _ProfileScreenState extends State<ProfileScreen>
   void initState() {
     super.initState();
     _updateTime();
-    _loadStoredName();
     _initializeAnimations();
   }
 
@@ -131,7 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     await Future.delayed(const Duration(milliseconds: 200));
     _subtitleController.forward();
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future.delayed(const Duration(milliseconds: 200));
     _formController.forward();
 
     await Future.delayed(const Duration(milliseconds: 200));
@@ -152,22 +152,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
-  void _loadStoredName() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? storedName = prefs.getString('userName');
-    if (storedName != null) {
-      setState(() {
-        _storedName = storedName;
-        _nameController.text = storedName;
-      });
-    }
-  }
-
-  void _saveName(String name) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('userName', name);
-  }
-
   void _updateTime() {
     setState(() {
       _currentTime = DateFormat('hh:mm a').format(
@@ -175,32 +159,14 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
   }
 
-  bool _validateName(String name) {
-    // Updated regex to allow spaces
-    final nameRegExp = RegExp(r"^[a-zA-Z\s]+$");
-    return nameRegExp.hasMatch(name.trim()) && name.trim().length >= 2;
-  }
-
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
 
+    final auth = context.watch<AuthService>();
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF4F46E5),
-              Color(0xFF7C3AED),
-              Color(0xFFEC4899),
-              Color(0xFFF59E0B),
-            ],
-            stops: [0.0, 0.3, 0.7, 1.0],
-          ),
-        ),
+      body: UniverseBackground(
         child: Stack(
           children: [
             // Animated background waves
@@ -230,19 +196,34 @@ class _ProfileScreenState extends State<ProfileScreen>
                   child: Column(
                     children: [
                       // Back button
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(25),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(25),
+                            ),
+                            child: IconButton(
+                              icon: const Icon(Icons.arrow_back,
+                                  color: Colors.white),
+                              onPressed: () => Navigator.pop(context),
+                            ),
                           ),
-                          child: IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ),
+                          if (auth.isLoggedIn)
+                            TextButton.icon(
+                              onPressed: () async {
+                                await context.read<AuthService>().signOut();
+                                if (mounted) {
+                                  Navigator.pushNamedAndRemoveUntil(
+                                      context, '/login', (r) => false);
+                                }
+                              },
+                              icon: const Icon(Icons.logout, color: Colors.white),
+                              label: const Text('Logout',
+                                  style: TextStyle(color: Colors.white)),
+                            ),
+                        ],
                       ),
 
                       const SizedBox(height: 40),
@@ -257,7 +238,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                               offset:
                                   Offset(0, 20 * (1 - _titleAnimation.value)),
                               child: const Text(
-                                'KYC',
+                                'Profile',
                                 style: TextStyle(
                                   fontSize: 56,
                                   fontWeight: FontWeight.bold,
@@ -289,7 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                             child: Opacity(
                               opacity: _subtitleAnimation.value,
                               child: const Text(
-                                'Know Your College',
+                                'Your Information',
                                 style: TextStyle(
                                   fontSize: 18,
                                   color: Colors.white,
@@ -304,7 +285,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
                       const SizedBox(height: 60),
 
-                      // Animated central circle with pulsing effect
+                      // Animated central circle with pulsing effect and avatar
                       AnimatedBuilder(
                         animation: _pulseAnimation,
                         builder: (context, child) {
@@ -329,12 +310,18 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ),
                                 ],
                               ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.person_outline,
-                                  size: 60,
-                                  color: Color(0xFF4F46E5),
-                                ),
+                              child: Center(
+                                child: auth.currentUser?.avatarUrl != null
+                                    ? CircleAvatar(
+                                        radius: 60,
+                                        backgroundImage: NetworkImage(
+                                            auth.currentUser!.avatarUrl!),
+                                      )
+                                    : const Icon(
+                                        Icons.person_outline,
+                                        size: 60,
+                                        color: Color(0xFF4F46E5),
+                                      ),
                               ),
                             ),
                           );
@@ -343,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
                       const SizedBox(height: 50),
 
-                      // Animated form
+                      // Animated user information display
                       AnimatedBuilder(
                         animation: _formAnimation,
                         builder: (context, child) {
@@ -361,67 +348,121 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     width: 1,
                                   ),
                                 ),
-                                child: TextFormField(
-                                  controller: _nameController,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  decoration: InputDecoration(
-                                    labelText: 'Enter your name',
-                                    labelStyle: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 16,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // User Name
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.person,
+                                          color: Colors.white70,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text(
+                                                'Name',
+                                                style: TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w300,
+                                                ),
+                                              ),
+                                              Text(
+                                                auth.currentUser?.displayName ?? 'Guest User',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                      borderSide: const BorderSide(
-                                        color: Colors.white30,
-                                        width: 1,
+                                    
+                                    const SizedBox(height: 20),
+                                    
+                                    // User Email
+                                    if (auth.currentUser?.email != null) ...[
+                                      Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.email,
+                                            color: Colors.white70,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                const Text(
+                                                  'Email',
+                                                  style: TextStyle(
+                                                    color: Colors.white70,
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.w300,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  auth.currentUser!.email!,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
                                       ),
+                                      
+                                      const SizedBox(height: 20),
+                                    ],
+                                    
+                                    // User ID
+                                    Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.fingerprint,
+                                          color: Colors.white70,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Text(
+                                                'User ID',
+                                                style: TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w300,
+                                                ),
+                                              ),
+                                              Text(
+                                                auth.currentUser?.userId ?? 'Unknown',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w400,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                      borderSide: const BorderSide(
-                                        color: Colors.white30,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                      borderSide: const BorderSide(
-                                        color: Colors.white,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    errorBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(15),
-                                      borderSide: const BorderSide(
-                                        color: Colors.red,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.white.withOpacity(0.1),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 16,
-                                    ),
-                                  ),
-                                  validator: (value) {
-                                    if (value == null || value.trim().isEmpty) {
-                                      return 'Name cannot be empty';
-                                    } else if (!_validateName(value)) {
-                                      return 'Please enter a valid name (letters and spaces only)';
-                                    }
-                                    return null;
-                                  },
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _isNameValid = _validateName(value);
-                                    });
-                                  },
+                                  ],
                                 ),
                               ),
                             ),
@@ -436,23 +477,25 @@ class _ProfileScreenState extends State<ProfileScreen>
                         animation: _buttonAnimation,
                         builder: (context, child) {
                           return Transform.translate(
-                            offset:
-                                Offset(0, 40 * (1 - _buttonAnimation.value)),
+                            offset: Offset(0, 20 * (1 - _buttonAnimation.value)),
                             child: Opacity(
                               opacity: _buttonAnimation.value,
                               child: Container(
                                 width: double.infinity,
                                 height: 60,
                                 decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(30),
                                   gradient: const LinearGradient(
-                                    colors: [Colors.white, Color(0xFFF8FAFC)],
+                                    colors: [
+                                      Colors.white,
+                                      Color(0xFFE0E7FF),
+                                    ],
                                   ),
+                                  borderRadius: BorderRadius.circular(30),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: Colors.black.withOpacity(0.2),
-                                      blurRadius: 15,
-                                      offset: const Offset(0, 8),
+                                      color: Colors.white.withOpacity(0.3),
+                                      blurRadius: 20,
+                                      spreadRadius: 2,
                                     ),
                                   ],
                                 ),
@@ -461,14 +504,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(30),
                                     onTap: () {
-                                      if (_formKey.currentState!.validate()) {
-                                        String userName =
-                                            _nameController.text.trim();
-                                        _saveName(userName);
-                                        updateMessage(userName);
-                                        Navigator.pushNamed(
-                                            context, '/chatScreen');
-                                      }
+                                      Navigator.pushNamed(
+                                          context, '/chatScreen');
                                     },
                                     child: Container(
                                       alignment: Alignment.center,
@@ -492,17 +529,65 @@ class _ProfileScreenState extends State<ProfileScreen>
 
                       const Spacer(),
 
-                      // Time display
-                      Text(
-                        _currentTime,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w300,
-                        ),
+                      // History preview
+                      FutureBuilder(
+                        future: ChatHistoryService().getAllChatHistories(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                            return const SizedBox.shrink();
+                          }
+                          final items = snapshot.data!;
+                          return Column(
+                            children: [
+                              const Text('Recent history',
+                                  style: TextStyle(
+                                      color: Colors.white70, fontSize: 14)),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                height: 80,
+                                child: ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: items.length > 3 ? 3 : items.length,
+                                  itemBuilder: (context, index) {
+                                    final item = items[index];
+                                    return Container(
+                                      width: 120,
+                                      margin: const EdgeInsets.only(right: 8),
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.title,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            DateFormat('MMM dd, hh:mm a')
+                                                .format(item.timestamp),
+                                            style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 10),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-
-                      const SizedBox(height: 20),
                     ],
                   ),
                 ),
@@ -515,6 +600,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 }
 
+// Wave painter for background animation
 class WavePainter extends CustomPainter {
   final Animation<double> animation;
   final double waveHeight;
@@ -538,13 +624,10 @@ class WavePainter extends CustomPainter {
     final y = size.height * 0.8;
     path.moveTo(0, y);
 
-    for (double x = 0; x < size.width; x++) {
+    for (double x = 0; x <= size.width; x++) {
       path.lineTo(
         x,
-        y +
-            math.sin((x / size.width * 2 * math.pi * waveSpeed) +
-                    animation.value) *
-                waveHeight,
+        y + math.sin((x / size.width * 2 * math.pi) + (animation.value * waveSpeed)) * waveHeight,
       );
     }
 

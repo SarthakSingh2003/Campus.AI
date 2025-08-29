@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:voice_chatbot_assistant/components/custom_button.dart';
+import 'package:kira_college_ai/components/custom_button.dart';
 
 void connectionErrorCustomDialog(BuildContext context) {
   showDialog(

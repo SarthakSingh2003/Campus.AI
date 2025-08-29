@@ -8,8 +8,8 @@ class TtsService {
   String? language;
   bool isCurrentLanguageInstalled = false;
   double _volume = 0.8; // Reduced volume for more natural sound
-  double _pitch = 1.0; // Normal pitch for human-like voice
-  double _speechRate = 0.5; // Much slower speech rate for human-like speaking
+  double _pitch = 1.3; // Higher pitch for feminine voice
+  double _speechRate = 0.8; // Faster speech rate for natural human-like speaking
 
   TtsService() {
     initTts();
@@ -39,6 +39,11 @@ class TtsService {
     flutterTts.setErrorHandler((msg) {
       print("TTS error: $msg");
     });
+
+    // Set feminine voice after initialization
+    Future.delayed(const Duration(milliseconds: 500), () {
+      setFeminineVoiceIfAvailable();
+    });
   }
 
   bool get isAndroid => !kIsWeb && Platform.isAndroid;
@@ -55,6 +60,42 @@ class TtsService {
     if (voice != null) {
       print("TTS: Default voice -> $voice");
     }
+  }
+
+  // Method to set feminine voice settings
+  Future<void> setFeminineVoice() async {
+    await setPitch(1.3); // Higher pitch for feminine voice
+    await setSpeechRate(0.8); // Faster speech rate
+    await setVolume(0.8); // Optimal volume
+    print("TTS: Feminine voice settings applied");
+  }
+
+  // Method to get available voices and set a feminine one if available
+  Future<void> setFeminineVoiceIfAvailable() async {
+    if (isAndroid) {
+      try {
+        var voices = await flutterTts.getVoices;
+        if (voices != null) {
+          // Look for feminine voices (usually have "female" in the name or higher pitch)
+          for (var voice in voices) {
+            String voiceName = voice['name'].toString().toLowerCase();
+            if (voiceName.contains('female') || 
+                voiceName.contains('woman') || 
+                voiceName.contains('girl') ||
+                voiceName.contains('samantha') ||
+                voiceName.contains('victoria')) {
+              await flutterTts.setVoice(voice);
+              print("TTS: Set feminine voice -> ${voice['name']}");
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        print("TTS: Error setting feminine voice: $e");
+      }
+    }
+    // Apply feminine voice settings regardless of voice selection
+    await setFeminineVoice();
   }
 
   // Method to set language with Hindi support
@@ -120,16 +161,16 @@ class TtsService {
 
   // Method to set speech rate (0.0 to 1.0) - More human-like settings
   Future<void> setSpeechRate(double speechRate) async {
-    // Clamp to a more human-like range (0.3 to 0.7)
-    _speechRate = speechRate.clamp(0.3, 0.7);
+    // Clamp to a more human-like range (0.5 to 1.0) for faster speech
+    _speechRate = speechRate.clamp(0.5, 1.0);
     await flutterTts.setSpeechRate(_speechRate);
     print("TTS: Speech rate set to $_speechRate");
   }
 
   // Method to set pitch (0.5 to 2.0) - More natural settings
   Future<void> setPitch(double pitch) async {
-    // Clamp to a more natural range (0.8 to 1.2)
-    _pitch = pitch.clamp(0.8, 1.2);
+    // Clamp to a more natural range (1.0 to 1.5) for feminine voice
+    _pitch = pitch.clamp(1.0, 1.5);
     await flutterTts.setPitch(_pitch);
     print("TTS: Pitch set to $_pitch");
   }

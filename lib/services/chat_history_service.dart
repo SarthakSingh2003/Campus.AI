@@ -30,6 +30,17 @@ class ChatHistoryService {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final List<ChatHistory> histories = await getAllChatHistories();
 
+    // Check if this conversation already exists (prevent duplicates)
+    bool alreadyExists = histories.any((history) => 
+      history.title == title && 
+      history.messages.length == messages.length &&
+      history.timestamp.isAfter(DateTime.now().subtract(const Duration(minutes: 5)))
+    );
+
+    if (alreadyExists) {
+      return; // Don't save if it's a duplicate
+    }
+
     final ChatHistory newHistory = ChatHistory(
       id: _uuid.v4(),
       timestamp: DateTime.now(),

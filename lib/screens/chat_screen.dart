@@ -1,7 +1,6 @@
 // lib/screens/chat_screen.dart (redesigned)
 import 'dart:math';
 import 'dart:ui';
-import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -9,22 +8,23 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:translator/translator.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:voice_chatbot_assistant/api_key.dart';
-import 'package:voice_chatbot_assistant/components/pip_camera_box.dart';
-import 'package:voice_chatbot_assistant/components/assistant_message.dart';
-import 'package:voice_chatbot_assistant/components/user_message.dart';
-import 'package:voice_chatbot_assistant/components/voice_wave_visualization.dart';
-import 'package:voice_chatbot_assistant/components/voice_ripple_animation.dart';
-import 'package:voice_chatbot_assistant/constant/languages.dart';
-import 'package:voice_chatbot_assistant/constant/messages.dart';
-import 'package:voice_chatbot_assistant/screens/tts.dart';
-import 'package:voice_chatbot_assistant/models/chat_history.dart';
-import 'package:voice_chatbot_assistant/services/chat_history_service.dart';
-import 'package:voice_chatbot_assistant/screens/chat_history_screen.dart';
+import 'package:kira_college_ai/api_key.dart';
+import 'package:kira_college_ai/components/assistant_message.dart';
+import 'package:kira_college_ai/components/user_message.dart';
+
+import 'package:kira_college_ai/components/voice_ripple_animation.dart';
+import 'package:kira_college_ai/constant/languages.dart';
+import 'package:kira_college_ai/constant/messages.dart';
+import 'package:kira_college_ai/screens/tts.dart';
+import 'package:kira_college_ai/models/chat_history.dart';
+import 'package:kira_college_ai/services/chat_history_service.dart';
+import 'package:kira_college_ai/screens/chat_history_screen.dart';
+import 'package:kira_college_ai/services/college_data_service.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
-import 'package:voice_chatbot_assistant/constant/theme_provider.dart';
-import 'package:voice_chatbot_assistant/constant/theme.dart';
+import 'package:kira_college_ai/constant/theme_provider.dart';
+
+import 'package:kira_college_ai/services/auth_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final ChatHistory? chatHistory;
@@ -51,9 +51,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   String detectedLanguage = "";
   Timer? _silenceTimer;
   bool _isSilenceDetected = false;
-  bool _showCamera = false;
-  Offset _cameraPosition = const Offset(100, 100);
-  bool _isCameraAvailable = false;
   String _errorMessage = '';
   TextEditingController _saveHistoryController = TextEditingController();
 
@@ -212,53 +209,20 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _checkAndRequestPermission() async {
-    // Check camera permission
-    PermissionStatus cameraStatus = await Permission.camera.status;
-    if (cameraStatus.isDenied) {
-      cameraStatus = await Permission.camera.request();
-    }
-
     // Check microphone permission (important for speech recognition)
     PermissionStatus microphoneStatus = await Permission.microphone.status;
     if (microphoneStatus.isDenied) {
       microphoneStatus = await Permission.microphone.request();
     }
 
-    if (cameraStatus.isGranted && microphoneStatus.isGranted) {
-      _checkCameraAvailability();
-    } else if (cameraStatus.isPermanentlyDenied ||
-        microphoneStatus.isPermanentlyDenied) {
+    if (microphoneStatus.isPermanentlyDenied) {
       setState(() {
-        _errorMessage =
-            "Camera or microphone permission is permanently denied. Please enable it in settings.";
+        _errorMessage = "Microphone permission is permanently denied. Please enable it in settings.";
       });
       openAppSettings();
     } else {
       setState(() {
-        _errorMessage =
-            "Camera and microphone permissions are required to use this feature.";
-      });
-    }
-  }
-
-  Future<void> _checkCameraAvailability() async {
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isNotEmpty) {
-        setState(() {
-          _isCameraAvailable = true;
-          _errorMessage = '';
-        });
-      } else {
-        setState(() {
-          _isCameraAvailable = false;
-          _errorMessage = 'No camera available on this device.';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isCameraAvailable = false;
-        _errorMessage = 'Failed to access the camera. Please try again.';
+        _errorMessage = "Microphone permission is required to use this feature.";
       });
     }
   }
@@ -305,17 +269,24 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       // Detect if the message is in Hindi
       bool isHindi = _isHindiText(message);
 
-      if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
+      // First, check if the query is related to UIT/college information
+      String collegeResponse = CollegeDataService.getPersonalizedResponse(message);
+      
+      if (collegeResponse.isNotEmpty) {
+        // If it's a college-related query, use the college data service
+        _assistantResponse = "Hi! I'm KIRA, your AI assistant for United Institute of Technology Prayagraj. $collegeResponse";
+      } else if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
         _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
       } else if (message.contains('sleepless') ||
           message.contains('feeling sleepless')) {
         _assistantResponse = "Hey, I've been observing you...";
       } else if (isHindi) {
-        // Handle Hindi responses
+        // Handle Hindi responses with KIRA's personality
         final prompt =
+            "You are KIRA, an AI assistant for United Institute of Technology Prayagraj. "
             "Respond in Hindi (हिंदी) with a friendly, conversational tone. "
-            "Provide practical advice for: $message. "
-            "Keep the response natural and helpful.";
+            "Introduce yourself as KIRA and provide helpful information about: $message. "
+            "Keep the response natural and helpful, focusing on college-related topics when possible.";
 
         final response = await model
             .generateContent([Content.text(prompt)]).timeout(
@@ -330,9 +301,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               "माफ़ करें, मैं उत्तर नहीं दे पाया। कृपया फिर से कोशिश करें।";
         }
       } else {
+        // Handle English responses with KIRA's personality
         final prompt =
+            "You are KIRA, an AI assistant specifically designed for United Institute of Technology Prayagraj. "
             "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
-            "Provide practical advice for: $message";
+            "Always introduce yourself as KIRA and provide helpful information about: $message. "
+            "Focus on college-related topics, academic guidance, and UIT-specific information when relevant. "
+            "Be knowledgeable about the college's courses, placements, infrastructure, and student life.";
 
         final response = await model
             .generateContent([Content.text(prompt)]).timeout(
@@ -402,6 +377,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           messages.add({'role': 'user', 'content': text});
         });
         await getChatResponse(text.toLowerCase());
+        
+        // Auto-save conversation after each exchange
+        _autoSaveConversation();
         return;
       }
 
@@ -429,6 +407,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
 
       await getChatResponse(text.toLowerCase());
+      
+      // Auto-save conversation after each exchange
+      _autoSaveConversation();
     } catch (e) {
       if (kDebugMode) {
         print("Translation error: $e");
@@ -691,6 +672,33 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
+  // Auto-save conversation when it gets long enough
+  void _autoSaveConversation() async {
+    // Only auto-save if there are meaningful conversations (more than 4 messages total)
+    if (messages.length > dummyMessages.length + 4) {
+      String title = 'Chat ${DateTime.now().toString().substring(0, 16)}';
+      
+      // Try to create a better title from the first user message
+      if (messages.length > dummyMessages.length) {
+        String firstUserMessage = messages[dummyMessages.length]['content'] ?? '';
+        if (firstUserMessage.isNotEmpty) {
+          List<String> words = firstUserMessage.split(' ').take(3).toList();
+          if (words.isNotEmpty) {
+            title = words.join(' ');
+            if (title.length > 25) {
+              title = title.substring(0, 25) + '...';
+            }
+          }
+        }
+      }
+      
+      await _historyService.saveChatHistory(
+        title,
+        List<Map<String, String>>.from(messages),
+      );
+    }
+  }
+
   void _debugSpeechRecognitionStatus() async {
     // Check speech recognition status after a delay
     Future.delayed(const Duration(seconds: 2), () async {
@@ -712,45 +720,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final auth = Provider.of<AuthService>(context);
     final appTheme = themeProvider.currentTheme;
 
     return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: appTheme.buttonColor,
-        child: const Icon(Icons.color_lens, color: Colors.white),
-        onPressed: () async {
-          // Show theme switcher dialog
-          final selected = await showDialog<ThemeType>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Choose Theme'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: AppThemes.all
-                    .map((theme) => ListTile(
-                          leading: Icon(
-                            theme.type == ThemeType.universe
-                                ? Icons.public
-                                : theme.type == ThemeType.rainbow
-                                    ? Icons.gradient
-                                    : Icons.blur_on,
-                            color: theme.primary,
-                          ),
-                          title: Text(theme.name),
-                          trailing: themeProvider.currentType == theme.type
-                              ? const Icon(Icons.check, color: Colors.green)
-                              : null,
-                          onTap: () => Navigator.pop(context, theme.type),
-                        ))
-                    .toList(),
-              ),
-            ),
-          );
-          if (selected != null) {
-            themeProvider.setTheme(selected);
-          }
-        },
-      ),
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -907,7 +880,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   Container(
                     padding: const EdgeInsets.all(20),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
                         // Back button with space theme
                         Container(
@@ -927,29 +900,33 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                         ),
 
                         // Title with space theme
-                        AnimatedBuilder(
-                          animation: _titleAnimation,
-                          builder: (context, child) {
-                            return Transform.scale(
-                              scale: _titleAnimation.value,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 20, vertical: 10),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.white.withOpacity(0.2),
-                                      Colors.white.withOpacity(0.1),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.3),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: const Text(
-                                  'KYC Universe',
+                        Expanded(
+                          child: AnimatedBuilder(
+                            animation: _titleAnimation,
+                            builder: (context, child) {
+                              return Transform.scale(
+                                scale: _titleAnimation.value,
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 20, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          Colors.white.withOpacity(0.2),
+                                          Colors.white.withOpacity(0.1),
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(
+                                        color: Colors.white.withOpacity(0.3),
+                                        width: 1,
+                                      ),
+                                    ),
+                                                                    child: const Text(
+                                  'KIRA - UIT Assistant',
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
@@ -957,55 +934,77 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                     letterSpacing: 2,
                                   ),
                                 ),
-                              ),
-                            );
-                          },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                         ),
 
                         // Action buttons with space theme
-                        Row(
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(25),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.2),
-                                  width: 1,
-                                ),
-                              ),
-                              child: IconButton(
-                                icon: const Icon(Icons.history,
-                                    color: Colors.white),
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => ChatHistoryScreen(),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Chat History Button
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(25),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.2),
+                                      width: 1,
                                     ),
-                                  );
-                                },
-                              ),
-                            ),
-                            if (!widget.isFromHistory) ...[
-                              const SizedBox(width: 10),
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(25),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.2),
-                                    width: 1,
+                                  ),
+                                  child: IconButton(
+                                    icon: const Icon(Icons.history,
+                                        color: Colors.white),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => ChatHistoryScreen(),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                                child: IconButton(
-                                  icon: const Icon(Icons.save,
-                                      color: Colors.white),
-                                  onPressed: _showSaveHistoryDialog,
+                                const SizedBox(width: 10),
+                                
+                                // Profile Button
+                                GestureDetector(
+                                  onTap: () => Navigator.pushNamed(context, '/profile'),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 16,
+                                        backgroundColor: Colors.white24,
+                                        backgroundImage: auth.currentUser?.avatarUrl != null
+                                            ? NetworkImage(auth.currentUser!.avatarUrl!)
+                                            : null,
+                                        child: auth.currentUser?.avatarUrl == null
+                                            ? const Icon(Icons.person, color: Colors.white, size: 18)
+                                            : null,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          auth.currentUser?.displayName ?? 'My Profile',
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
+                                          style: const TextStyle(color: Colors.white),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1090,22 +1089,22 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                                   ),
                                                   shape: BoxShape.circle,
                                                 ),
-                                                child: const Text(
-                                                  'KYC',
-                                                  style: TextStyle(
-                                                    fontSize: 48,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.white,
-                                                    letterSpacing: 8,
-                                                    shadows: [
-                                                      Shadow(
-                                                        offset: Offset(2, 2),
-                                                        blurRadius: 10,
-                                                        color: Colors.black26,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
+                                                child:                                         const Text(
+                                          'KIRA',
+                                          style: TextStyle(
+                                            fontSize: 48,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                            letterSpacing: 8,
+                                            shadows: [
+                                              Shadow(
+                                                offset: Offset(2, 2),
+                                                blurRadius: 10,
+                                                color: Colors.black26,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                               ),
                                             );
                                           },
@@ -1114,7 +1113,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                         const SizedBox(height: 20),
 
                                         const Text(
-                                          'Explore the Universe of Knowledge!',
+                                          'Your AI Assistant for UIT Prayagraj!',
                                           style: TextStyle(
                                             fontSize: 18,
                                             color: Colors.white70,
@@ -1261,53 +1260,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                           },
                         ),
 
-                        // Animated camera button
-                        AnimatedBuilder(
-                          animation: _particleController,
-                          builder: (context, child) {
-                            return Transform.rotate(
-                              angle: sin(_particleAnimation.value) * 0.1,
-                              child: Container(
-                                width: 70,
-                                height: 70,
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      Colors.white.withOpacity(0.1),
-                                      Colors.white.withOpacity(0.05),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(35),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.3),
-                                    width: 2,
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.white.withOpacity(0.1),
-                                      blurRadius: 15,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
-                                ),
-                                child: IconButton(
-                                  icon: const Icon(Icons.camera_alt_rounded,
-                                      color: Colors.white),
-                                  iconSize: 30,
-                                  onPressed: () async {
-                                    if (_isCameraAvailable) {
-                                      setState(() {
-                                        _showCamera = !_showCamera;
-                                      });
-                                    } else {
-                                      await _checkAndRequestPermission();
-                                    }
-                                  },
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        // Spacer to balance layout after removing camera button
+                        const SizedBox(width: 70, height: 70),
 
                         // Animated delete button
                         AnimatedBuilder(
@@ -1355,31 +1309,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               ),
             ),
 
-            // PiP Camera
-            if (_showCamera && _isCameraAvailable)
-              Positioned(
-                left: _cameraPosition.dx,
-                top: _cameraPosition.dy,
-                child: GestureDetector(
-                  onPanUpdate: (details) {
-                    setState(() {
-                      _cameraPosition += details.delta;
-                    });
-                  },
-                  child: Container(
-                    width: 200,
-                    height: 150,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(15),
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(13),
-                      child: const PiPCameraScreen(),
-                    ),
-                  ),
-                ),
-              ),
+            // Camera removed
 
             // Voice Ripple Animation (displayed on screen when recording)
             if (isRecording)
@@ -1397,6 +1327,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
+      // Floating action button for saving conversation
+      floatingActionButton: !widget.isFromHistory ? FloatingActionButton(
+        onPressed: _showSaveHistoryDialog,
+        backgroundColor: Colors.white.withOpacity(0.2),
+        child: const Icon(Icons.save, color: Colors.white),
+        tooltip: 'Save Conversation',
+      ) : null,
     );
   }
 }

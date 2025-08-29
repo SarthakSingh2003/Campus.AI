@@ -30,68 +30,25 @@ class ThemedButton extends StatelessWidget {
       letterSpacing: 1,
     );
 
-    if (appTheme.type == ThemeType.universe) {
-      decoration = BoxDecoration(
-        gradient: LinearGradient(
-          colors: [appTheme.primary, appTheme.accent],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    // Universe theme (only)
+    decoration = BoxDecoration(
+      gradient: LinearGradient(
+        colors: [appTheme.primary, appTheme.accent],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      borderRadius: BorderRadius.circular(borderRadius),
+      boxShadow: [
+        BoxShadow(
+          color: appTheme.primary.withOpacity(0.3),
+          blurRadius: 16,
+          spreadRadius: 2,
         ),
-        borderRadius: BorderRadius.circular(borderRadius),
-        boxShadow: [
-          BoxShadow(
-            color: appTheme.primary.withOpacity(0.3),
-            blurRadius: 16,
-            spreadRadius: 2,
-          ),
-        ],
-      );
-      textStyle = textStyle.copyWith(color: Colors.white, shadows: [
-        const Shadow(
-            blurRadius: 8, color: Colors.black26, offset: Offset(1, 2)),
-      ]);
-    } else if (appTheme.type == ThemeType.rainbow) {
-      decoration = BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFFe66465),
-            Color(0xFFf6b73c),
-            Color(0xFF4F46E5),
-            Color(0xFF7C3AED),
-            Color(0xFFEC4899),
-            Color(0xFFF59E0B),
-            Color(0xFF10B981),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(borderRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.pinkAccent.withOpacity(0.15),
-            blurRadius: 12,
-            spreadRadius: 2,
-          ),
-        ],
-      );
-      textStyle =
-          textStyle.copyWith(color: Colors.white, fontWeight: FontWeight.w900);
-    } else {
-      // Glass
-      decoration = BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.12),
-            blurRadius: 16,
-            spreadRadius: 2,
-          ),
-        ],
-      );
-      textStyle = textStyle.copyWith(color: Colors.white.withOpacity(0.95));
-    }
+      ],
+    );
+    textStyle = textStyle.copyWith(color: Colors.white, shadows: const [
+      Shadow(blurRadius: 8, color: Colors.black26, offset: Offset(1, 2)),
+    ]);
 
     return Container(
       height: height,
