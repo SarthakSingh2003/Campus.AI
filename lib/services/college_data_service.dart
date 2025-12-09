@@ -9,8 +9,10 @@ class CollegeDataService {
     'established': CollegeConfig.established,
     'website': CollegeConfig.website,
     'type': 'Private Engineering College',
-    'affiliation': 'Dr. A.P.J. Abdul Kalam Technical University (AKTU)',
+    'affiliation': CollegeConfig.affiliation,
+    'approval': CollegeConfig.approval,
     'address': CollegeConfig.address,
+    'corporate_office': CollegeConfig.corporateOffice,
     'phone': CollegeConfig.phone,
     'email': CollegeConfig.email,
   };
@@ -29,13 +31,22 @@ class CollegeDataService {
     'placement_rate': CollegeConfig.placementRate,
     'average_package': CollegeConfig.averagePackage,
     'highest_package': CollegeConfig.highestPackage,
+    'total_placements': CollegeConfig.totalPlacements,
+    'total_alumni': CollegeConfig.totalAlumni,
     'major_recruiters': CollegeConfig.majorRecruiters,
     'cs_department_highest': '${CollegeConfig.highestPackage} (Walmart)',
   };
+  
+  // Fee information
+  static final Map<String, String> feeInfo = CollegeConfig.feeInfo;
+  
+  // Academic programs
+  static final List<String> academicPrograms = CollegeConfig.academicPrograms;
 
   // Computer Science Department information
   static final Map<String, dynamic> csDepartmentInfo = {
     'faculty_count': CollegeConfig.csFacultyCount,
+    'hod': CollegeConfig.cseHod,
     'labs': CollegeConfig.csLabs,
     'specializations': CollegeConfig.specializations['CSE']!,
     'opportunities': [
@@ -68,11 +79,13 @@ class CollegeDataService {
   static String getPersonalizedResponse(String query) {
     query = query.toLowerCase();
 
-    if (query.contains('placement') || query.contains('job') || query.contains('package')) {
+    if (query.contains('placement') || query.contains('job') || query.contains('package') || query.contains('alumni')) {
       return _generatePlacementResponse();
-    } else if (query.contains('computer') || query.contains('cs') || query.contains('cse')) {
+    } else if (query.contains('computer') || query.contains('cs') || query.contains('cse') || query.contains('hod') || query.contains('head')) {
       return _generateCSDepartmentResponse();
-    } else if (query.contains('course') || query.contains('branch') || query.contains('department') || query.contains('program')) {
+    } else if (query.contains('fee') || query.contains('cost') || query.contains('tuition') || query.contains('price')) {
+      return _generateFeeResponse();
+    } else if (query.contains('course') || query.contains('branch') || query.contains('department') || query.contains('program') || query.contains('btech') || query.contains('mtech')) {
       return _generateCourseResponse();
     } else if (query.contains('infrastructure') || query.contains('campus') || query.contains('facility')) {
       return _generateInfrastructureResponse();
@@ -80,6 +93,8 @@ class CollegeDataService {
       return _generateVisionMissionResponse();
     } else if (query.contains('contact') || query.contains('phone') || query.contains('email') || query.contains('address')) {
       return _generateContactResponse();
+    } else if (query.contains('affiliation') || query.contains('approval') || query.contains('aicte') || query.contains('aktu')) {
+      return _generateAffiliationResponse();
     } else if (query.contains('uit') || query.contains('united') || query.contains('college')) {
       return _generateGeneralCollegeResponse();
     }
@@ -93,11 +108,13 @@ class CollegeDataService {
     return "United Institute of Technology has an excellent placement record with a ${placementInfo['placement_rate']} placement rate. "
         "The average package for students is around ${placementInfo['average_package']}, with the highest package reaching ${placementInfo['highest_package']}. "
         "Major recruiters include ${placementInfo['major_recruiters'].join(', ')}. "
+        "UIT has ${placementInfo['total_placements']} and ${placementInfo['total_alumni']}. "
         "The Computer Science department specifically has seen outstanding placements with roles in AI, ML, and Data Science.";
   }
 
   static String _generateCSDepartmentResponse() {
     return "The Computer Science Department at UIT is one of the strongest, with ${csDepartmentInfo['faculty_count']} experienced faculty members. "
+        "The Head of Department (HOD) is ${csDepartmentInfo['hod']}. "
         "The department offers specializations in ${csDepartmentInfo['specializations'].join(', ')}. "
         "Students have access to state-of-the-art labs including ${csDepartmentInfo['labs'].sublist(0, 3).join(', ')}, and more. "
         "Graduates from our CS department have secured excellent positions in leading companies, with career opportunities in ${csDepartmentInfo['opportunities'].sublist(0, 4).join(', ')}, among others.";
@@ -119,26 +136,42 @@ class CollegeDataService {
   }
 
   static String _generateCourseResponse() {
-    return "UIT offers ${courseInfo['total_courses']} undergraduate engineering programs with a duration of ${courseInfo['duration']}. "
-        "Our courses include: ${courseInfo['undergraduate_courses'].join(', ')}. "
-        "The Computer Science department has the highest intake with ${courseInfo['intake_capacity']['CSE']}, "
-        "followed by other departments with ${courseInfo['intake_capacity']['IT']} each. "
-        "Each department offers specialized tracks - for example, CSE students can specialize in ${courseInfo['specializations']['CSE'].join(', ')}. "
+    return "UIT offers ${courseInfo['total_courses']} undergraduate engineering programs. "
+        "Our academic programs include: ${academicPrograms.join(', ')}. "
+        "The undergraduate courses are: ${courseInfo['undergraduate_courses'].join(', ')}. "
+        "Each program has a duration of ${courseInfo['duration']}. "
+        "Each department offers specialized tracks - for example, CSE students can specialize in ${courseInfo['specializations']['CSE']?.join(', ') ?? 'various specializations'}. "
         "All programs are designed to provide hands-on experience and industry-relevant skills.";
+  }
+  
+  static String _generateFeeResponse() {
+    return "The fee structure at UIT varies by program: "
+        "For B.Tech (4-year full program), the total tuition fee ranges from ${feeInfo['btech_4year']}. "
+        "For B.Tech (Lateral Entry), fees ${feeInfo['btech_lateral']}. "
+        "For M.Tech programs, the total fee is ${feeInfo['mtech']}. "
+        "Please contact the college directly for the most current and detailed fee information.";
+  }
+  
+  static String _generateAffiliationResponse() {
+    return "United Institute of Technology is a private engineering college established in ${collegeInfo['established']}. "
+        "The institute is approved by ${collegeInfo['approval']} and affiliated to ${collegeInfo['affiliation']}. "
+        "This ensures that all programs meet national standards and are recognized across India.";
   }
 
   static String _generateContactResponse() {
     return "You can contact United Institute of Technology at: "
         "Phone: ${collegeInfo['phone']}, "
         "Email: ${collegeInfo['email']}, "
-        "Address: ${collegeInfo['address']}. "
+        "Campus Address: ${collegeInfo['address']}, "
+        "Corporate Office: ${collegeInfo['corporate_office']}. "
         "For more information, visit our website: ${collegeInfo['website']}";
   }
 
   static String _generateGeneralCollegeResponse() {
-    return "${collegeInfo['name']} is a premier engineering institute located in ${collegeInfo['location']}. "
-        "Established in ${collegeInfo['established']}, it is affiliated with ${collegeInfo['affiliation']}. "
-        "The college is known for its excellent faculty, state-of-the-art infrastructure, and strong placement record. "
+    return "${collegeInfo['name']} (UIT) is a premier private engineering institute located in ${collegeInfo['location']}. "
+        "Established in ${collegeInfo['established']}, it is approved by ${collegeInfo['approval']} and affiliated to ${collegeInfo['affiliation']}. "
+        "UIT offers ${courseInfo['total_courses']} undergraduate programs: ${courseInfo['undergraduate_courses'].join(', ')}. "
+        "The college is known for its excellent faculty, state-of-the-art infrastructure, and strong placement record with ${placementInfo['total_placements']}. "
         "With a focus on holistic development, UIT prepares students not just for careers but for leadership roles in the technology sector.";
   }
 }

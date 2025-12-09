@@ -5,7 +5,7 @@ import 'package:kira_college_ai/constant/messages.dart';
 import 'package:kira_college_ai/services/auth_service.dart';
 import 'package:kira_college_ai/services/chat_history_service.dart';
 import 'package:provider/provider.dart';
-import 'package:kira_college_ai/constant/universe_background.dart';
+import 'package:kira_college_ai/components/space_scaffold.dart';
 import 'dart:math' as math;
 
 class ProfileScreen extends StatefulWidget {
@@ -163,11 +163,15 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
+    final titleFontSize = screenWidth < 360
+        ? 42.0
+        : (screenWidth < 400 ? 48.0 : 56.0);
+    final avatarSize = screenWidth < 360 ? 110.0 : 150.0;
 
     final auth = context.watch<AuthService>();
-    return Scaffold(
-      body: UniverseBackground(
-        child: Stack(
+    return SpaceScaffold(
+      title: 'Profile',
+      child: Stack(
           children: [
             // Animated background waves
             ...List.generate(5, (index) {
@@ -188,47 +192,38 @@ class _ProfileScreenState extends State<ProfileScreen>
               );
             }),
 
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Form(
+            Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Form(
                   key: _formKey,
-                  child: Column(
-                    children: [
-                      // Back button
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                            child: IconButton(
-                              icon: const Icon(Icons.arrow_back,
-                                  color: Colors.white),
-                              onPressed: () => Navigator.pop(context),
-                            ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                          child: Column(
+                            children: [
+                      // Top actions row inside content area (logout only)
+                      if (auth.isLoggedIn)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: () async {
+                              await context.read<AuthService>().signOut();
+                              if (mounted) {
+                                Navigator.pushNamedAndRemoveUntil(
+                                    context, '/login', (r) => false);
+                              }
+                            },
+                            icon: const Icon(Icons.logout, color: Colors.white),
+                            label: const Text('Logout',
+                                style: TextStyle(color: Colors.white)),
                           ),
-                          if (auth.isLoggedIn)
-                            TextButton.icon(
-                              onPressed: () async {
-                                await context.read<AuthService>().signOut();
-                                if (mounted) {
-                                  Navigator.pushNamedAndRemoveUntil(
-                                      context, '/login', (r) => false);
-                                }
-                              },
-                              icon: const Icon(Icons.logout, color: Colors.white),
-                              label: const Text('Logout',
-                                  style: TextStyle(color: Colors.white)),
-                            ),
-                        ],
-                      ),
+                        ),
 
                       const SizedBox(height: 40),
 
-                      // Animated KYC title
+                      // Animated title
                       AnimatedBuilder(
                         animation: _titleAnimation,
                         builder: (context, child) {
@@ -237,10 +232,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                             child: Transform.translate(
                               offset:
                                   Offset(0, 20 * (1 - _titleAnimation.value)),
-                              child: const Text(
+                              child: Text(
                                 'Profile',
                                 style: TextStyle(
-                                  fontSize: 56,
+                                  fontSize: titleFontSize,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.white,
                                   letterSpacing: 8,
@@ -292,8 +287,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                           return Transform.scale(
                             scale: _pulseAnimation.value,
                             child: Container(
-                              width: 150,
-                              height: 150,
+                              width: avatarSize,
+                              height: avatarSize,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: const RadialGradient(
@@ -313,14 +308,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                               child: Center(
                                 child: auth.currentUser?.avatarUrl != null
                                     ? CircleAvatar(
-                                        radius: 60,
+                                        radius: avatarSize * 0.4,
                                         backgroundImage: NetworkImage(
                                             auth.currentUser!.avatarUrl!),
                                       )
-                                    : const Icon(
+                                    : Icon(
                                         Icons.person_outline,
-                                        size: 60,
-                                        color: Color(0xFF4F46E5),
+                                        size: avatarSize * 0.4,
+                                        color: const Color(0xFF4F46E5),
                                       ),
                               ),
                             ),
@@ -389,43 +384,44 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     const SizedBox(height: 20),
                                     
                                     // User Email
-                                    if (auth.currentUser?.email != null) ...[
-                                      Row(
-                                        children: [
-                                          const Icon(
-                                            Icons.email,
-                                            color: Colors.white70,
-                                            size: 20,
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                    ...(auth.currentUser?.email != null
+                                        ? [
+                                            Row(
                                               children: [
-                                                const Text(
-                                                  'Email',
-                                                  style: TextStyle(
-                                                    color: Colors.white70,
-                                                    fontSize: 14,
-                                                    fontWeight: FontWeight.w300,
-                                                  ),
+                                                const Icon(
+                                                  Icons.email,
+                                                  color: Colors.white70,
+                                                  size: 20,
                                                 ),
-                                                Text(
-                                                  auth.currentUser!.email!,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 16,
-                                                    fontWeight: FontWeight.w500,
+                                                const SizedBox(width: 10),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      const Text(
+                                                        'Email',
+                                                        style: TextStyle(
+                                                          color: Colors.white70,
+                                                          fontSize: 14,
+                                                          fontWeight: FontWeight.w300,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        auth.currentUser!.email!,
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 16,
+                                                          fontWeight: FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ),
                                                 ),
                                               ],
                                             ),
-                                          ),
-                                        ],
-                                      ),
-                                      
-                                      const SizedBox(height: 20),
-                                    ],
+                                            const SizedBox(height: 20),
+                                          ]
+                                        : []),
                                     
                                     // User ID
                                     Row(
@@ -527,7 +523,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                         },
                       ),
 
-                      const Spacer(),
+                      const SizedBox(height: 24),
 
                       // History preview
                       FutureBuilder(
@@ -588,15 +584,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                           );
                         },
                       ),
-                    ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
-            ),
           ],
         ),
-      ),
-    );
+      );
   }
 }
 

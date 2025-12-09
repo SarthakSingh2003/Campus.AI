@@ -102,11 +102,36 @@ keytool -list -v -keystore ~/upload-keystore.jks -alias upload
 2. Ensure Google Play Services is installed and updated
 3. Make sure you're signed into a Google account on the device
 
+## Web Platform Setup (Google Sign-In)
+
+For Google Sign-In to work on web, you need to configure the OAuth 2.0 Client ID:
+
+### Steps to Get Web OAuth Client ID:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Select your project: `aiassistant-f1260`
+3. Navigate to **APIs & Services** > **Credentials**
+4. Find the **OAuth 2.0 Client ID** with type **Web application**
+5. Copy the **Client ID** (format: `PROJECT_NUMBER-xxxxx.apps.googleusercontent.com`)
+
+### Update Configuration:
+
+1. **Update `web/index.html`:**
+   - Find the meta tag: `<meta name="google-signin-client_id" content="...">`
+   - Replace the content value with your Web OAuth Client ID
+
+2. **Update `lib/services/auth_service.dart`:**
+   - Find the constant: `static const String _webClientId = '...';`
+   - Replace the value with your Web OAuth Client ID
+
+### Current Web Client ID (verify this is correct):
+- **Client ID**: `745225092320-hkpsuerr53jav9u0eobfrifsk0tn5lop.apps.googleusercontent.com`
+- ⚠️ **Note**: This is from google-services.json (client_type 3). Verify this matches your Web OAuth Client ID in Google Cloud Console.
+
 ## Current Configuration Status
 
 ✅ **SHA1 Fingerprint**: Already configured correctly  
 ✅ **SHA256 Fingerprint**: Added to google-services.json  
 ✅ **Package Name**: Matches correctly  
-✅ **OAuth Client ID**: Configured in google-services.json  
-
-The main issue was likely the missing SHA256 fingerprint, which has now been added to your configuration.
+✅ **Android OAuth Client ID**: Configured in google-services.json  
+⚠️ **Web OAuth Client ID**: Needs verification from Google Cloud Console

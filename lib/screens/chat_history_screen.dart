@@ -6,6 +6,7 @@ import 'package:kira_college_ai/services/auth_service.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
+import 'package:kira_college_ai/components/space_scaffold.dart';
 
 class ChatHistoryScreen extends StatefulWidget {
   const ChatHistoryScreen({super.key});
@@ -111,22 +112,9 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen>
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
 
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF4F46E5),
-              Color(0xFF7C3AED),
-              Color(0xFFEC4899),
-              Color(0xFFF59E0B),
-            ],
-            stops: [0.0, 0.3, 0.7, 1.0],
-          ),
-        ),
-        child: Stack(
+    return SpaceScaffold(
+      title: 'Chat History',
+      child: Stack(
           children: [
             // Animated background waves (matching profile screen)
             ...List.generate(5, (index) {
@@ -147,92 +135,8 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen>
               );
             }),
 
-            SafeArea(
-              child: Column(
+            Column(
                 children: [
-                  // Modern app bar
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 15),
-                    child: Row(
-                      children: [
-                        // Back button
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ),
-
-                        const SizedBox(width: 20),
-
-                        // Animated KYC title
-                        Expanded(
-                          child: AnimatedBuilder(
-                            animation: _titleAnimation,
-                            builder: (context, child) {
-                              return Transform.scale(
-                                scale: _titleAnimation.value,
-                                child: Column(
-                                  children: [
-                                    const Text(
-                                      'Chat',
-                                      style: TextStyle(
-                                        fontSize: 32,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                        letterSpacing: 4,
-                                        shadows: [
-                                          Shadow(
-                                            offset: Offset(2, 2),
-                                            blurRadius: 10,
-                                            color: Colors.black26,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Builder(
-                                      builder: (context) {
-                                        final auth = context.watch<AuthService>();
-                                        if (auth.currentUser?.displayName != null) {
-                                          return Text(
-                                            'Welcome back, ${auth.currentUser!.displayName}!',
-                                            style: const TextStyle(
-                                              fontSize: 14,
-                                              color: Colors.white70,
-                                              fontWeight: FontWeight.w300,
-                                            ),
-                                          );
-                                        }
-                                        return const SizedBox.shrink();
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-
-                        // Subtitle
-                        const Text(
-                          'History',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.white70,
-                            fontWeight: FontWeight.w300,
-                            letterSpacing: 2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
                   // Main content
                   Expanded(
                     child: AnimatedBuilder(
@@ -495,10 +399,8 @@ class _ChatHistoryScreenState extends State<ChatHistoryScreen>
                   ),
                 ],
               ),
-            ),
           ],
         ),
-      ),
     );
   }
 }

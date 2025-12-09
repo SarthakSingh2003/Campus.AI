@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,10 +25,18 @@ class AuthService extends ChangeNotifier {
   static const _keyEmail = 'auth_email';
   static const _keyAvatarUrl = 'auth_avatar_url';
 
-  GoogleSignIn _googleSignIn = GoogleSignIn(scopes: [
-    'email',
-    'profile',
-  ]);
+  // Web OAuth Client ID - Get this from Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs > Web client
+  // Format: PROJECT_NUMBER-xxxxx.apps.googleusercontent.com
+  static const String _webClientId = '745225092320-hkpsuerr53jav9u0eobfrifsk0tn5lop.apps.googleusercontent.com';
+
+  GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: [
+      'email',
+      'profile',
+    ],
+    // For web platform, we need to provide the clientId
+    clientId: kIsWeb ? _webClientId : null,
+  );
 
   AuthService() {
     _loadFromStorage();
@@ -84,7 +93,10 @@ class AuthService extends ChangeNotifier {
       if (forceAccountPicker) {
         // Ensure previous session is cleared to always show account picker
         try { await _googleSignIn.signOut(); } catch (_) {}
-        _googleSignIn = GoogleSignIn(scopes: ['email','profile']);
+        _googleSignIn = GoogleSignIn(
+          scopes: ['email','profile'],
+          clientId: kIsWeb ? _webClientId : null,
+        );
       }
       final account = await _googleSignIn.signIn();
       if (account == null) return null; // cancelled

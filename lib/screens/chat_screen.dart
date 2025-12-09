@@ -23,6 +23,7 @@ import 'package:kira_college_ai/services/college_data_service.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:kira_college_ai/constant/theme_provider.dart';
+import 'package:kira_college_ai/components/space_scaffold.dart';
 
 import 'package:kira_college_ai/services/auth_service.dart';
 
@@ -54,6 +55,18 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   String _errorMessage = '';
   TextEditingController _saveHistoryController = TextEditingController();
 
+  // Wake word detection
+  bool _isWakeWordListening = false;
+  String _wakeWordBuffer = "";
+  static const List<String> _wakeWords = [
+    'hey kira',
+    'hello kira',
+    'namaste kira',
+    'hey kira',
+    'hello kira',
+    'namaste kira',
+  ];
+
   // Animation controllers
   late AnimationController _titleController;
   late AnimationController _loadingController;
@@ -80,6 +93,57 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   var _assistantResponse = "";
   String errorMessage = "";
 
+  // Simple rate limiter: ensure at least this duration between API calls
+  DateTime _lastApiCallAt = DateTime.fromMillisecondsSinceEpoch(0);
+  final Duration _minGapBetweenCalls = const Duration(seconds: 3);
+
+  // Centralized model call with retries and exponential backoff
+  Future<GenerateContentResponse> _safeGenerate(String prompt) async {
+    // Honor a minimal gap between calls to avoid RPM bursts
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastApiCallAt);
+    if (elapsed < _minGapBetweenCalls) {
+      await Future.delayed(_minGapBetweenCalls - elapsed);
+    }
+
+    int attempt = 0;
+    const int maxAttempts = 3;
+    Duration backoff = const Duration(seconds: 2);
+
+    while (true) {
+      attempt++;
+      try {
+        final resp = await model
+            .generateContent([Content.text(prompt)])
+            .timeout(const Duration(seconds: 30), onTimeout: () {
+          throw TimeoutException('API request timed out');
+        });
+        _lastApiCallAt = DateTime.now();
+        return resp;
+      } catch (e) {
+        final message = e.toString().toLowerCase();
+        final isQuota = message.contains('quota') || message.contains('429');
+        if (attempt >= maxAttempts || !isQuota) {
+          rethrow;
+        }
+        // If explicit per-minute quota, wait for a full window (~65s)
+        if (message.contains('per minute')) {
+          if (mounted) {
+            setState(() {
+              _assistantResponse = 'I hit a temporary rate limit. Waiting a minute and I’ll try again automatically.';
+              messages.add({'role': 'assistant', 'content': _assistantResponse});
+            });
+          }
+          await Future.delayed(const Duration(seconds: 65));
+        } else {
+          // Exponential backoff
+          await Future.delayed(backoff);
+          backoff *= 2;
+        }
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -96,9 +160,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     // Initialize Gemini model
     try {
+      // Use the model returned by ListModels
       model = GenerativeModel(
-        model: 'gemini-2.0-flash-thinking-exp-1219',
+        model: 'gemini-2.5-flash',
         apiKey: geminiApiKey,
+        generationConfig: GenerationConfig(
+          temperature: 0.8,
+          topP: 0.9,
+          topK: 40,
+          maxOutputTokens: 4096, // Increased to allow complete responses
+        ),
       );
     } catch (e) {
       if (kDebugMode) {
@@ -118,6 +189,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     // Debug speech recognition status
     _debugSpeechRecognitionStatus();
+
+    // Start wake-word listening after a short delay
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && !isRecording && !isLoading) {
+        _startWakeWordListening();
+      }
+    });
   }
 
   void _initializeAnimations() {
@@ -190,6 +268,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _waveController.dispose();
     _particleController.dispose();
     _silenceTimer?.cancel();
+    _stopWakeWordListening();
     ttsService.stop();
     speechToTextInstance.stop();
     _saveHistoryController.dispose();
@@ -200,8 +279,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     for (var message in messages) {
       if (message['role'] == 'assistant') {
         await ttsService.setLanguage('en-IN');
-        await ttsService.setSpeechRate(0.5);
-        await ttsService.setPitch(1.0);
+        await ttsService.setFeminineVoiceIfAvailable();
+        await ttsService.setSpeechRate(ttsService.platformBaseRate + 0.1);
+        await ttsService.setPitch(1.45);
         await ttsService.setVolume(0.8);
         await ttsService.speak(message['content']!);
       }
@@ -231,8 +311,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     try {
       final langSettings = langSetting[selectedLanguageCode];
       await ttsService.setLanguage(langSettings!);
-      await ttsService.setSpeechRate(0.5);
-      await ttsService.setPitch(1.0);
+      await ttsService.setFeminineVoiceIfAvailable();
+      await ttsService.setSpeechRate(ttsService.platformBaseRate + 0.1);
+      await ttsService.setPitch(1.45);
       await ttsService.setVolume(0.8);
     } catch (e) {
       if (kDebugMode) {
@@ -266,14 +347,27 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     initializeTextToSpeech();
 
     try {
-      // Detect if the message is in Hindi
+      // Detect if the message is in Hindi (both Devanagari and Romanized)
       bool isHindi = _isHindiText(message);
+      
+      // IMPORTANT: Set language code based on user's input language
+      // If Hindi is detected, use Hindi. Otherwise, explicitly use English.
+      if (isHindi) {
+        selectedLanguageCode = 'hi';
+      } else {
+        // Explicitly set to English for English questions
+        selectedLanguageCode = 'en';
+      }
 
       // First, check if the query is related to UIT/college information
-      String collegeResponse = CollegeDataService.getPersonalizedResponse(message);
+      // Only use college data service for English queries
+      String collegeResponse = '';
+      if (!isHindi) {
+        collegeResponse = CollegeDataService.getPersonalizedResponse(message);
+      }
       
-      if (collegeResponse.isNotEmpty) {
-        // If it's a college-related query, use the college data service
+      if (collegeResponse.isNotEmpty && !isHindi) {
+        // If it's a college-related query and NOT Hindi, use English response
         _assistantResponse = "Hi! I'm KIRA, your AI assistant for United Institute of Technology Prayagraj. $collegeResponse";
       } else if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
         _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
@@ -283,46 +377,58 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       } else if (isHindi) {
         // Handle Hindi responses with KIRA's personality
         final prompt =
-            "You are KIRA, an AI assistant for United Institute of Technology Prayagraj. "
-            "Respond in Hindi (हिंदी) with a friendly, conversational tone. "
-            "Introduce yourself as KIRA and provide helpful information about: $message. "
-            "Keep the response natural and helpful, focusing on college-related topics when possible.";
+            "You are KIRA, the helpful assistant for United Institute of Technology Prayagraj. "
+            "The user asked in Hindi. You MUST respond entirely in Hindi (हिंदी) using Devanagari script. "
+            "Do NOT use English words except for proper nouns like 'KIRA', 'UIT', 'United Institute of Technology Prayagraj'. "
+            "Respond with a warm, natural, human tone. Avoid saying phrases like 'as an AI'. "
+            "Be concise, empathetic, and clear. Introduce yourself casually as KIRA and help with: $message. "
+            "Prefer college-related, actionable info when relevant. Remember: Respond ONLY in Hindi. "
+            "Make sure to provide complete, full responses without cutting off mid-sentence.";
 
-        final response = await model
-            .generateContent([Content.text(prompt)]).timeout(
-                const Duration(seconds: 15), onTimeout: () {
-          throw TimeoutException('API request timed out');
-        });
+        final response = await _safeGenerate(prompt);
 
         if (response.text != null && response.text!.isNotEmpty) {
           _assistantResponse = response.text!;
+          if (kDebugMode && !_isResponseComplete(_assistantResponse)) {
+            print("Warning: Response may appear incomplete");
+          }
         } else {
           _assistantResponse =
               "माफ़ करें, मैं उत्तर नहीं दे पाया। कृपया फिर से कोशिश करें।";
         }
       } else {
         // Handle English responses with KIRA's personality
+        // IMPORTANT: Explicitly instruct to reply in English only
         final prompt =
-            "You are KIRA, an AI assistant specifically designed for United Institute of Technology Prayagraj. "
-            "Respond in ${selectedLanguageCode.toUpperCase()} with a friendly, conversational tone. "
-            "Always introduce yourself as KIRA and provide helpful information about: $message. "
-            "Focus on college-related topics, academic guidance, and UIT-specific information when relevant. "
-            "Be knowledgeable about the college's courses, placements, infrastructure, and student life.";
+            "You are KIRA, the helpful assistant for United Institute of Technology Prayagraj. "
+            "The user asked in English. You MUST respond entirely in English. "
+            "Do NOT use Hindi or any other language. "
+            "Reply with a warm, human, conversational tone. "
+            "Avoid robotic phrasing or mentioning that you're an AI. "
+            "Introduce yourself casually as KIRA and help with: $message. "
+            "When relevant, focus on UIT topics (courses, placements, infra, student life) and give concise, actionable guidance. "
+            "Make sure to provide complete, full responses without cutting off mid-sentence.";
 
-        final response = await model
-            .generateContent([Content.text(prompt)]).timeout(
-                const Duration(seconds: 15), onTimeout: () {
-          throw TimeoutException('API request timed out');
-        });
+        final response = await _safeGenerate(prompt);
 
         if (response.text != null && response.text!.isNotEmpty) {
           _assistantResponse = response.text!;
+          if (kDebugMode && !_isResponseComplete(_assistantResponse)) {
+            print("Warning: Response may appear incomplete");
+          }
         } else {
           _assistantResponse = "Sorry, I couldn't generate a response.";
         }
       }
     } catch (e) {
-      _assistantResponse = 'Error fetching response. Please try again.';
+      // Show a clearer message and log details in debug
+      String friendly = 'I’m having trouble reaching the server right now. Please try again.';
+      if (e is GenerativeAIException) {
+        friendly = 'Request failed: ${e.message}';
+      } else if (e is TimeoutException) {
+        friendly = 'The request is taking too long. Try again in a moment.';
+      }
+      _assistantResponse = friendly;
       if (kDebugMode) {
         print("Gemini API Error: $e");
       }
@@ -334,17 +440,113 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         });
 
         if (_assistantResponse.isNotEmpty) {
-          await ttsService.speak(_assistantResponse);
+          // Ensure mic is released before TTS (Android audio focus)
+          try { await speechToTextInstance.stop(); } catch (_) {}
+          // Give the system a brief moment to release mic and grant audio focus
+          await Future.delayed(const Duration(milliseconds: 200));
+          // Decide language for TTS based on the language code set from user's input
+          // Use selectedLanguageCode which is set based on user's question language
+          final bool speakHindi = selectedLanguageCode == 'hi';
+          try {
+            // Use the language code that matches the user's input language
+            final langToUse = speakHindi ? 'hi-IN' : (langSetting[selectedLanguageCode] ?? 'en-IN');
+            print("Chat: Setting TTS language to: $langToUse (User asked in: ${selectedLanguageCode == 'hi' ? 'Hindi' : 'English'})");
+            await ttsService.setLanguage(langToUse);
+            // Wait for language to be fully set before configuring voice
+            await Future.delayed(const Duration(milliseconds: 150));
+            await ttsService.setFeminineVoiceIfAvailable();
+            // Wait a bit more to ensure TTS engine is ready
+            await Future.delayed(const Duration(milliseconds: 150));
+            // Re-verify language is set correctly before speaking
+            if (speakHindi) {
+              await ttsService.setLanguage('hi-IN');
+              print("Chat: Re-confirmed Hindi language before speaking");
+            } else {
+              await ttsService.setLanguage('en-IN');
+              print("Chat: Re-confirmed English language before speaking");
+            }
+          } catch (e) {
+            if (kDebugMode) {
+              print("TTS setup error: $e");
+            }
+          }
+          await ttsService.speak(_assistantResponse.trim());
+          
+          // Restart wake-word listening after TTS completes (handled via TTS service completion)
+          // We'll restart it after a delay to ensure TTS has finished
+          Future.delayed(const Duration(seconds: 2), () async {
+            // Wait a bit more to ensure TTS is fully done
+            await Future.delayed(const Duration(milliseconds: 500));
+            if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+              _startWakeWordListening();
+            }
+          });
         }
       }
     }
   }
 
-  // Helper method to detect Hindi text
+  // Helper method to check if response is complete
+  bool _isResponseComplete(String response) {
+    if (response.isEmpty) return false;
+    
+    // Check if response ends with proper punctuation
+    final trimmed = response.trim();
+    if (trimmed.isEmpty) return false;
+    
+    // Check for common sentence endings
+    final lastChar = trimmed[trimmed.length - 1];
+    if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
+        lastChar == '।' || lastChar == '!' || lastChar == '?') {
+      return true;
+    }
+    
+    // Check if it ends with common incomplete patterns
+    final lowerResponse = trimmed.toLowerCase();
+    if (lowerResponse.endsWith(' and') || 
+        lowerResponse.endsWith(' but') ||
+        lowerResponse.endsWith(' or') ||
+        lowerResponse.endsWith(' the') ||
+        lowerResponse.endsWith(' a') ||
+        lowerResponse.endsWith(' an') ||
+        lowerResponse.endsWith(' और') ||
+        lowerResponse.endsWith(' लेकिन') ||
+        lowerResponse.endsWith(' या')) {
+      return false;
+    }
+    
+    // If response is very short, assume it might be complete
+    if (trimmed.length < 50) return true;
+    
+    // Default to assuming it's complete if no obvious incomplete patterns
+    return true;
+  }
+
+  // Helper method to detect Hindi text (both Devanagari and Romanized)
   bool _isHindiText(String text) {
     // Check for Hindi characters (Devanagari script)
     RegExp hindiRegex = RegExp(r'[\u0900-\u097F]');
-    return hindiRegex.hasMatch(text);
+    if (hindiRegex.hasMatch(text)) {
+      return true;
+    }
+    
+    // Check for common Romanized Hindi words
+    final romanizedHindiWords = [
+      'kaun', 'kya', 'kahan', 'kab', 'kaise', 'kyun', 'hain', 'hai', 'hoga', 'hogi',
+      'main', 'tum', 'aap', 'hum', 'unka', 'unke', 'uska', 'uski', 'mera', 'meri',
+      'namaste', 'dhanyavad', 'shukriya', 'kripya', 'mujhe', 'tujhe', 'ko', 'se',
+      'mein', 'par', 'tak', 'bhi', 'bhi', 'aur', 'ya', 'lekin', 'magar', 'phir',
+      'ab', 'aaj', 'kal', 'parson', 'pehle', 'baad', 'sab', 'sabse', 'kuch', 'koi'
+    ];
+    
+    final lowerText = text.toLowerCase();
+    for (final word in romanizedHindiWords) {
+      if (lowerText.contains(word)) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 
   Future<String> detectLanguage(String text) async {
@@ -369,9 +571,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
 
     try {
-      // Check if text is in Hindi first
+      // Check if text is in Hindi first (both Devanagari and Romanized)
       if (_isHindiText(text)) {
         selectedLanguageCode = 'hi';
+        if (kDebugMode) {
+          print("Chat: Hindi detected (Romanized or Devanagari), setting language to Hindi");
+        }
         setState(() {
           messages = List<Map<String, String>>.from(messages);
           messages.add({'role': 'user', 'content': text});
@@ -383,22 +588,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         return;
       }
 
+      // For non-Hindi text, explicitly set to English
+      selectedLanguageCode = 'en';
+      if (kDebugMode) {
+        print("Chat: English detected, setting language to English");
+      }
+
+      // Optional: Use language detection for other languages in the future
+      // For now, default to English for all non-Hindi input
       String detectedLang = await detectLanguage(text);
       if (kDebugMode) {
-        print("Detected Language: $detectedLang");
-      }
-
-      bool languageFound = false;
-      for (var lang in languages) {
-        if (lang['name']!.toLowerCase() == detectedLang.toLowerCase()) {
-          selectedLanguageCode = lang['code']!;
-          languageFound = true;
-          break;
-        }
-      }
-
-      if (!languageFound) {
-        selectedLanguageCode = 'en';
+        print("Detected Language: $detectedLang (but using English for response)");
       }
 
       setState(() {
@@ -462,6 +662,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   void startListeningNow() async {
     FocusScope.of(context).unfocus();
+    // Keep current TTS playing; do not force-stop on barge-in
+
+    // Stop wake-word listening when manually starting
+    if (_isWakeWordListening) {
+      _stopWakeWordListening();
+    }
 
     // Check if speech recognition is available
     if (!speechToTextInstance.isAvailable) {
@@ -567,6 +773,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           });
         }
       });
+      // Restart wake-word listening if no speech detected
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+          _startWakeWordListening();
+        }
+      });
     } else {
       await translateText(recordedAudioString);
       setState(() {
@@ -575,7 +787,131 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
+  // Wake-word detection methods
+  bool _checkForWakeWord(String text) {
+    if (text.isEmpty) return false;
+    
+    String normalizedText = text.toLowerCase().trim();
+    
+    // Check if any wake word is contained in the text
+    for (String wakeWord in _wakeWords) {
+      if (normalizedText.contains(wakeWord)) {
+        if (kDebugMode) {
+          print("Wake word '$wakeWord' detected in: '$normalizedText'");
+        }
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  Future<void> _startWakeWordListening() async {
+    if (_isWakeWordListening || isRecording || isLoading) {
+      return;
+    }
+
+    // Check if speech recognition is available
+    if (!speechToTextInstance.isAvailable) {
+      if (kDebugMode) {
+        print("Speech recognition not available for wake-word listening");
+      }
+      return;
+    }
+
+    // Check microphone permission
+    PermissionStatus microphoneStatus = await Permission.microphone.status;
+    if (microphoneStatus.isDenied) {
+      microphoneStatus = await Permission.microphone.request();
+    }
+
+    if (!microphoneStatus.isGranted) {
+      if (kDebugMode) {
+        print("Microphone permission not granted for wake-word listening");
+      }
+      return;
+    }
+
+    setState(() {
+      _isWakeWordListening = true;
+      _wakeWordBuffer = "";
+    });
+
+    try {
+      if (kDebugMode) {
+        print("Starting wake-word listening...");
+      }
+      
+      await speechToTextInstance.listen(
+        onResult: (result) {
+          if (_isWakeWordListening && !isRecording) {
+            String text = result.recognizedWords.toLowerCase().trim();
+            if (text.isNotEmpty) {
+              _wakeWordBuffer = text;
+              if (_checkForWakeWord(text)) {
+                _stopWakeWordListening();
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (mounted && !isRecording) {
+                    startListeningNow();
+                  }
+                });
+              }
+            }
+          }
+        },
+        listenFor: const Duration(seconds: 60),
+        pauseFor: const Duration(seconds: 5),
+        partialResults: true,
+        cancelOnError: false,
+        listenMode: ListenMode.dictation, // Use dictation mode for continuous listening
+        onSoundLevelChange: (level) {
+          // Minimal processing for wake-word detection
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error starting wake-word listening: $e");
+      }
+      setState(() {
+        _isWakeWordListening = false;
+      });
+      
+      // Retry after a delay
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+          _startWakeWordListening();
+        }
+      });
+    }
+  }
+
+  Future<void> _stopWakeWordListening() async {
+    if (!_isWakeWordListening) return;
+    
+    try {
+      await speechToTextInstance.stop();
+    } catch (e) {
+      if (kDebugMode) {
+        print("Error stopping wake-word listening: $e");
+      }
+    }
+    
+    setState(() {
+      _isWakeWordListening = false;
+      _wakeWordBuffer = "";
+    });
+    
+    if (kDebugMode) {
+      print("Stopped wake-word listening");
+    }
+  }
+
   void onSpeechToTextResult(SpeechRecognitionResult recognitionResult) {
+    // This handler is only for normal recording mode, not wake-word detection
+    if (_isWakeWordListening) {
+      return; // Wake-word detection uses its own handler
+    }
+    
     setState(() {
       recordedAudioString = recognitionResult.recognizedWords;
     });
@@ -601,7 +937,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       messages = List.from(dummyMessages);
       errorMessage = "";
     });
-    await ttsService.stop();
+    // Do not stop TTS when clearing history
   }
 
   void _showSaveHistoryDialog() {
@@ -723,16 +1059,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final auth = Provider.of<AuthService>(context);
     final appTheme = themeProvider.currentTheme;
 
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: appTheme.gradient,
-          ),
-        ),
-        child: Stack(
+    return SpaceScaffold(
+      title: 'KIRA - UIT Assistant',
+      floatingActionButton: !widget.isFromHistory
+          ? FloatingActionButton(
+              onPressed: _showSaveHistoryDialog,
+              backgroundColor: Colors.white.withOpacity(0.2),
+              child: const Icon(Icons.save, color: Colors.white),
+              tooltip: 'Save Conversation',
+            )
+          : null,
+      child: Stack(
           children: [
             // Universe elements
             if (appTheme.showSpaceElements) ...[
@@ -873,142 +1210,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               }),
             ],
             // Main content
-            SafeArea(
-              child: Column(
+            Column(
                 children: [
-                  // Top bar with space theme
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        // Back button with space theme
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(25),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.2),
-                              width: 1,
-                            ),
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ),
-
-                        // Title with space theme
-                        Expanded(
-                          child: AnimatedBuilder(
-                            animation: _titleAnimation,
-                            builder: (context, child) {
-                              return Transform.scale(
-                                scale: _titleAnimation.value,
-                                child: Center(
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 20, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          Colors.white.withOpacity(0.2),
-                                          Colors.white.withOpacity(0.1),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(
-                                        color: Colors.white.withOpacity(0.3),
-                                        width: 1,
-                                      ),
-                                    ),
-                                                                    child: const Text(
-                                  'KIRA - UIT Assistant',
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    letterSpacing: 2,
-                                  ),
-                                ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-
-                        // Action buttons with space theme
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Chat History Button
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(25),
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.2),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: IconButton(
-                                    icon: const Icon(Icons.history,
-                                        color: Colors.white),
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => ChatHistoryScreen(),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                
-                                // Profile Button
-                                GestureDetector(
-                                  onTap: () => Navigator.pushNamed(context, '/profile'),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 16,
-                                        backgroundColor: Colors.white24,
-                                        backgroundImage: auth.currentUser?.avatarUrl != null
-                                            ? NetworkImage(auth.currentUser!.avatarUrl!)
-                                            : null,
-                                        child: auth.currentUser?.avatarUrl == null
-                                            ? const Icon(Icons.person, color: Colors.white, size: 18)
-                                            : null,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Flexible(
-                                        child: Text(
-                                          auth.currentUser?.displayName ?? 'My Profile',
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                          style: const TextStyle(color: Colors.white),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  // Content area below SpaceScaffold header
 
                   // Error message with space theme
                   if (errorMessage.isNotEmpty)
@@ -1307,7 +1511,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   ),
                 ],
               ),
-            ),
+            
 
             // Camera removed
 
@@ -1326,15 +1530,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               ),
           ],
         ),
-      ),
-      // Floating action button for saving conversation
-      floatingActionButton: !widget.isFromHistory ? FloatingActionButton(
-        onPressed: _showSaveHistoryDialog,
-        backgroundColor: Colors.white.withOpacity(0.2),
-        child: const Icon(Icons.save, color: Colors.white),
-        tooltip: 'Save Conversation',
-      ) : null,
-    );
+      );
   }
 }
 
