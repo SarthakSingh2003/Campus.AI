@@ -20,7 +20,7 @@ class TtsService {
   /// Platform-aware base rate (FlutterTTS scales differently per platform).
   double get _platformBaseRate {
     if (kIsWeb) return 1.0; // Web uses browser speech API (1.0 = normal)
-    if (Platform.isAndroid) return 0.55; // Android normal is ~0.5–0.6
+    if (Platform.isAndroid) return 0.4; // Android normal is ~0.5–0.6, reducing to 0.4 per user request
     if (Platform.isIOS) return 0.65; // iOS normal is slightly higher
     return 0.85; // Fallback for other platforms
   }
@@ -63,6 +63,10 @@ class TtsService {
     Future.delayed(const Duration(milliseconds: 500), () {
       setFeminineVoiceIfAvailable();
     });
+  }
+
+  void setCompletionHandler(Function() callback) {
+    flutterTts.setCompletionHandler(callback);
   }
 
   bool get isAndroid => !kIsWeb && Platform.isAndroid;
@@ -130,7 +134,7 @@ class TtsService {
   Future<void> setFeminineVoiceIfAvailable() async {
     if (isAndroid) {
       try {
-        var voices = await flutterTts.getVoices;
+        List<dynamic>? voices = await flutterTts.getVoices;
         if (voices != null) {
           // 1) Try preferred female voices for current locale
           final String locale = language ?? 'en-IN';
@@ -138,11 +142,18 @@ class TtsService {
           
           for (final preferredName in preferred) {
             final match = voices.firstWhere(
-              (v) => (v['name']?.toString().toLowerCase() ?? '') == preferredName.toLowerCase(),
+              (v) {
+                if (v is! Map) return false;
+                final name = v['name']?.toString().toLowerCase() ?? '';
+                return name == preferredName.toLowerCase();
+              },
               orElse: () => null,
             );
             if (match != null) {
-              await flutterTts.setVoice(match);
+              final voiceMap = Map<String, String>.from(
+                (match as Map).map((key, value) => MapEntry(key.toString(), value.toString()))
+              );
+              await flutterTts.setVoice(voiceMap);
               print("TTS: Set preferred feminine voice -> ${match['name']}");
               // Reset pitch to natural since we found a real female voice
               await setPitch(1.0); 
@@ -152,6 +163,7 @@ class TtsService {
 
           // 2) Otherwise pick any female-looking voice for the locale
           for (var voice in voices) {
+            if (voice is! Map) continue;
             final name = (voice['name']?.toString() ?? '').toLowerCase();
             final loc = (voice['locale']?.toString() ?? '').toLowerCase();
             final gender = (voice['gender']?.toString() ?? '').toLowerCase();
@@ -163,7 +175,10 @@ class TtsService {
                  name.contains('-f') ||
                  name.contains('girl') ||
                  name.contains('woman'))) {
-              await flutterTts.setVoice(voice);
+              final voiceMap = Map<String, String>.from(
+                voice.map((key, value) => MapEntry(key.toString(), value.toString()))
+              );
+              await flutterTts.setVoice(voiceMap);
               print("TTS: Set generic feminine voice -> ${voice['name']}");
               await setPitch(1.0);
               return;

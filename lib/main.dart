@@ -11,14 +11,15 @@ import 'package:kira_college_ai/screens/chat_history_screen.dart';
 import 'package:kira_college_ai/services/auth_service.dart';
 import 'package:kira_college_ai/screens/login_screen.dart';
 import 'package:kira_college_ai/screens/signup_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:kira_college_ai/firebase_options.dart'; // Assuming this is where DefaultFirebaseOptions is located
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    await Firebase.initializeApp();
-  } catch (_) {
-    // Allow app to start even if Firebase isn't configured yet
-  }
+  await dotenv.load(fileName: ".env");
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(MultiProvider(providers: [
     ChangeNotifierProvider(create: (_) => ThemeProvider()),
     ChangeNotifierProvider(create: (_) => AuthService()),

@@ -18,7 +18,7 @@
         </intent>
     </queries>
     <application
-        android:label="MyBuddy"
+        android:label="KIRA-UIT"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

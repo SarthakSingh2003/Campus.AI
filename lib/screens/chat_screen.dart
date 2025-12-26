@@ -6,7 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:translator/translator.dart';
-import 'package:kira_college_ai/services/ollama_service.dart';
+import 'package:kira_college_ai/services/gemini_service.dart';
 import 'package:kira_college_ai/components/assistant_message.dart';
 import 'package:kira_college_ai/components/user_message.dart';
 
@@ -44,7 +44,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final SpeechToText speechToTextInstance = SpeechToText();
   final GoogleTranslator translator = GoogleTranslator();
   final ChatHistoryService _historyService = ChatHistoryService();
-  final OllamaService _ollamaService = OllamaService();
+  final GeminiService _geminiService = GeminiService();
 
   String recordedAudioString = "";
   String translatedString = "";
@@ -56,16 +56,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   // Wake word detection
   bool _isWakeWordListening = false;
+  Timer? _wakeWordWatchdog;
   String _wakeWordBuffer = "";
   static const List<String> _wakeWords = [
-    'hey kira',
-    'hello kira',
-    'namaste kira',
-    'hey kira',
-    'hello kira',
-    'namaste kira',
+    'hello',
+    'hi',
+    'namaste',
+    'hey',
+    'stop', // Added STOP command
   ];
-
   // Animation controllers
   late AnimationController _titleController;
   late AnimationController _loadingController;
@@ -298,7 +297,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       // 2. Call Backend (RAG Logic)
       // The backend uses English knowledge base, so it returns English.
-      String responseText = await _ollamaService.generateResponse(queryForBackend);
+      String responseText = await _geminiService.generateResponse(queryForBackend);
       
       // 3. Process Response (Translate back to Hindi if needed)
       if (isHindi) {
@@ -312,9 +311,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       _assistantResponse = responseText;
     } catch (e) {
-      String friendly = "I'm having trouble reaching the AI brain right now. Please check if Ollama is running.";
+      String friendly = "I'm having trouble reaching the AI brain right now. Please check your connection.";
       if (kDebugMode) {
-        print("Ollama Error: $e");
+        print("Gemini Error: $e");
       }
       _assistantResponse = friendly;
     } finally {
@@ -457,11 +456,25 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       bool available = await speechToTextInstance.initialize(
         onError: (error) {
           if (kDebugMode) {
-            print("Speech recognition error: $error");
+            print("Speech recognition error: ${error.errorMsg}");
           }
-          setState(() {
-            errorMessage = "Speech recognition error: ${error.errorMsg}";
-          });
+          
+          // Fix for Samsung Tablets: Suppress timeout errors during wake word listening
+          if (error.errorMsg == 'error_speech_timeout' || error.errorMsg == 'error_no_match') {
+            if (_isWakeWordListening && !isRecording) {
+               if (kDebugMode) print("Timeout detected. Restarting listener silently...");
+               Future.delayed(const Duration(milliseconds: 100), () {
+                 if (mounted) _startWakeWordListening();
+               });
+               return; // Skip showing error message
+            }
+          }
+
+          if (mounted) {
+            setState(() {
+              errorMessage = "Speech recognition error: ${error.errorMsg}";
+            });
+          }
         },
         onStatus: (status) {
           if (kDebugMode) {
@@ -667,11 +680,24 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
 
       try {
-        // Safety check: Stop if already active to prevent InvalidStateError
+        // Stop if already active to prevent state errors
         if (speechToTextInstance.isListening) {
            await speechToTextInstance.stop();
            await Future.delayed(const Duration(milliseconds: 50));
         }
+
+        // Watchdog: Ensure listener is actually running
+        _wakeWordWatchdog?.cancel();
+        _wakeWordWatchdog = Timer.periodic(const Duration(seconds: 10), (timer) {
+          if (!_isWakeWordListening) {
+             timer.cancel();
+             return;
+          }
+          if (!speechToTextInstance.isListening && !isRecording) {
+            if (kDebugMode) print("Watchdog: Listener died, restarting...");
+            _startWakeWordListening();
+          }
+        });
 
         await speechToTextInstance.listen(
           onResult: (result) async {
@@ -680,31 +706,27 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               if (text.isNotEmpty) {
                 _wakeWordBuffer = text;
                 if (_checkForWakeWord(text)) {
-                  // Wake word detected! 
-                  
-                  // 1. Stop wake word listening
-                  await _stopWakeWordListening();
-                  
-                  // 2. Stop any current TTS (Barge-in capability)
-                  await ttsService.stop();
-                  
-                  // 3. Play Greeting
-                  // We need to briefly wait for mic to release before TTS
-                  await Future.delayed(const Duration(milliseconds: 200));
-                  
-                  // Set English voice for greeting
-                   await ttsService.setLanguage('en-IN');
-                   await ttsService.setFeminineVoiceIfAvailable();
+                  // Check for STOP command specifically
+                  if (text.contains('stop')) {
+                     if (kDebugMode) print("Wake word: STOP detected");
+                     await _stopWakeWordListening();
+                     await ttsService.stop(); // Stop TTS
+                     _safeRestartWakeWord(); // Just go back to listening
+                     return;
+                  }
+
+                  // Wake word detected!
+                  await _stopWakeWordListening(); // Stop detecting "Hello"
+                  await ttsService.stop(); // Stop any previous speech
                    
-                   await ttsService.speak("Hello! How may I help you?");
+                  // Play Greeting
+                  await ttsService.setLanguage('en-IN');
+                  await ttsService.setFeminineVoiceIfAvailable();
+                  await ttsService.speak("Hello! I'm listening.");
                    
-                   // 4. Wait for Greeting to vaguely finish (approx 2 seconds)
-                   // A better way would be a completion callback, but a delay is simpler for now.
-                   // Or we can just start listening immediately and let echo cancellation handle it, 
-                   // but usually it's better to wait.
-                   await Future.delayed(const Duration(seconds: 2));
+                  // Wait for greeting to finish (approx 1.5s)
+                  await Future.delayed(const Duration(milliseconds: 1500));
                    
-                   // 5. Start listening for the actual query
                   if (mounted && !isRecording) {
                     startListeningNow();
                   }
@@ -712,8 +734,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               }
             }
           },
-          listenFor: const Duration(seconds: 60),
-          pauseFor: const Duration(seconds: 5),
+          listenFor: const Duration(seconds: 30),
+          pauseFor: const Duration(seconds: 4), // Balanced pause duration
           partialResults: true,
           cancelOnError: false,
           listenMode: ListenMode.dictation,
@@ -731,6 +753,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         });
       }
     }
+  }
+
+  void _safeRestartWakeWord() {
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+         if (kDebugMode) print("Restarting wake word listener...");
+        _startWakeWordListening();
+      }
+    });
   }
 
   Future<void> _stopWakeWordListening() async {

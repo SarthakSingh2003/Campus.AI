@@ -51,6 +51,8 @@ dependencies:
   flutter_in_app_pip: ^1.7.4
   http: ^1.6.0
   permission_handler: ^12.0.0+1
+  google_generative_ai: ^0.4.7
+  flutter_dotenv: ^6.0.0
 
 
   
@@ -87,6 +89,7 @@ flutter:
 
   # To add assets to your application, add an assets section, like this:
   assets:
+    - .env
     - images/
     - assets/universe/
 
