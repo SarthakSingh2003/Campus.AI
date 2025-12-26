@@ -83,29 +83,47 @@ class TtsService {
 
   // Preferred female voices by locale (Android Google TTS typical names)
   static const Map<String, List<String>> _preferredFemaleVoicesByLocale = {
-    'en-IN': ['en-in-x-end-local', 'en-in-x-ene-local'],
+    'en-IN': [
+      'en-in-x-end-network', // Network voices are higher quality
+      'en-in-x-ene-network',
+      'en-in-x-enc-network', 
+      'en-in-x-end-local', 
+      'en-in-x-ene-local',
+      'en-in-x-ahp-network', // Often high quality
+      'en-in-x-cxx-network',
+      'en-in-x-cxx-local'
+    ],
     'en-US': ['en-us-x-tpf-local', 'en-us-x-sfg-local', 'en-us-x-sfg-network'],
-    'hi-IN': ['hi-in-x-hie-local', 'hi-in-x-hif-local'],
-    'kn-IN': ['kn-in-x-knd-local'],
-    'ta-IN': ['ta-in-x-taf-local'],
-    'te-IN': ['te-in-x-tef-local'],
-    'ml-IN': ['ml-in-x-mld-local'],
-    'bn-IN': ['bn-in-x-bnf-local'],
-    'mr-IN': ['mr-in-x-mrf-local'],
-    'gu-IN': ['gu-in-x-guf-local'],
-    'pa-IN': ['pa-in-x-paf-local'],
+    'hi-IN': [
+      'hi-in-x-hie-network', 
+      'hi-in-x-hic-network',
+      'hi-in-x-hie-local', 
+      'hi-in-x-hif-local',
+      'hi-in-x-cxx-network'
+    ],
+    // ... other languages
   };
 
   // Method to set feminine voice settings
   Future<void> setFeminineVoice() async {
     // Adjust pitch based on language - lower for Hindi to avoid sharp/shrill
     final isHindi = language?.toLowerCase().contains('hi') ?? false;
-    await setPitch(isHindi ? 1.2 : 1.45); // Lower pitch for Hindi, higher for others
+    
+    // If we have a good female voice, we don't need extreme pitch
+    // If we are forcing a male voice to sound female, we need higher pitch.
+    // For now, let's assume we might have failed to get a female voice if it sounds "manly".
+    // But if we DID get a female voice, natural pitch is better.
+    
+    // We'll set a moderate pitch that works for both cases (1.1 - 1.2 is usually safe for female voices)
+    // 1.45 is very high (chipmunk territory often).
+    // On Web, pitch shifting often glitches, so we keep it natural (1.0)
+    await setPitch(isHindi ? 1.0 : (kIsWeb ? 1.0 : 1.1)); 
+    
     // Keep a slightly brisk pace but normalize for device-specific scaling
-    final targetRate = _platformBaseRate + (isHindi ? 0.05 : 0.1);
+    final targetRate = _platformBaseRate; // Standard rate is usually better for clarity
     await setSpeechRate(targetRate);
-    await setVolume(0.8); // Optimal volume
-    print("TTS: Feminine voice settings applied (pitch: ${isHindi ? 1.2 : 1.45})");
+    await setVolume(1.0); // Full volume
+    print("TTS: Feminine voice settings applied (pitch: ${isHindi ? 1.0 : 1.1})");
   }
 
   // Method to get available voices and set a feminine one if available
@@ -117,6 +135,7 @@ class TtsService {
           // 1) Try preferred female voices for current locale
           final String locale = language ?? 'en-IN';
           final preferred = _preferredFemaleVoicesByLocale[locale] ?? const [];
+          
           for (final preferredName in preferred) {
             final match = voices.firstWhere(
               (v) => (v['name']?.toString().toLowerCase() ?? '') == preferredName.toLowerCase(),
@@ -125,6 +144,8 @@ class TtsService {
             if (match != null) {
               await flutterTts.setVoice(match);
               print("TTS: Set preferred feminine voice -> ${match['name']}");
+              // Reset pitch to natural since we found a real female voice
+              await setPitch(1.0); 
               return;
             }
           }
@@ -134,14 +155,17 @@ class TtsService {
             final name = (voice['name']?.toString() ?? '').toLowerCase();
             final loc = (voice['locale']?.toString() ?? '').toLowerCase();
             final gender = (voice['gender']?.toString() ?? '').toLowerCase();
-            if (loc == (language ?? 'en-IN').toLowerCase() &&
+            
+            // Check broad matching
+            if (loc.contains((language ?? 'en-IN').toLowerCase().split('-')[0]) && // Loose locale match (en-IN vs en_IN)
                 (gender.contains('female') ||
                  name.contains('female') ||
                  name.contains('-f') ||
                  name.contains('girl') ||
                  name.contains('woman'))) {
               await flutterTts.setVoice(voice);
-              print("TTS: Set feminine voice -> ${voice['name']}");
+              print("TTS: Set generic feminine voice -> ${voice['name']}");
+              await setPitch(1.0);
               return;
             }
           }
@@ -149,9 +173,35 @@ class TtsService {
       } catch (e) {
         print("TTS: Error setting feminine voice: $e");
       }
+    } else if (kIsWeb) {
+      // Specialized logic for Web (Chrome/Edge on Windows often has "Microsoft Zira" or "Google US English")
+      try {
+        var voices = await flutterTts.getVoices;
+        if (voices != null) {
+          for (var voice in voices) {
+            final name = (voice['name']?.toString() ?? '').toLowerCase();
+            // "Zira" is the best standard female voice on Windows
+            // "Google US English" is female by default on Chrome
+            if (name.contains('zira') || 
+                name.contains('google us english') || 
+                name.contains('female')) {
+              await flutterTts.setVoice(voice);
+              print("TTS: Set Web feminine voice -> ${voice['name']}");
+              await setPitch(1.0);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        print("TTS: Error Web voice search: $e");
+      }
     }
-    // Apply feminine voice settings regardless of voice selection
-    await setFeminineVoice();
+    
+    // Fallback: Apply feminine usage settings if no specific voice found
+    // This will boost pitch to try and make a male voice sound female-ish
+    // But force natural on Web to avoid artifacts
+    await setPitch(kIsWeb ? 1.0 : 1.4); 
+    print("TTS: No specific female voice found, using fallback pitch");
   }
 
   // Method to set language with Hindi support
@@ -179,9 +229,9 @@ class TtsService {
       print("TTS: Set pitch to 1.2 for Hindi (less sharp/shrill)");
       await setSpeechRate(_platformBaseRate + 0.05); // keep Hindi slower
     } else {
-      await setPitch(1.45);
-      print("TTS: Set pitch to 1.45 for non-Hindi language (feminine)");
-      await setSpeechRate(_platformBaseRate + 0.1);
+      await setPitch(kIsWeb ? 1.0 : 1.1); // Reduced from 1.45 (too high) to 1.1 (slightly feminine but natural)
+      print("TTS: Set pitch to 1.1 for non-Hindi language");
+      await setSpeechRate(_platformBaseRate + 0.05);
     }
     
     if (isAndroid) {
@@ -297,36 +347,43 @@ class TtsService {
     }
   }
 
-  // Lightly cleans input without stripping punctuation (to preserve natural pauses)
+  // Cleans input to remove Markdown symbols (*, #) and Emojis that TTS might read aloud
   String _cleanText(String input) {
+    if (input.isEmpty) return "";
     String cleaned = input;
 
-    // Simple emoji removal - only remove common emoji patterns
-    // Using a more conservative approach that won't break the text
+    // 1. Remove Markdown formatting
+    // Remove individual asterisks (*)
+    cleaned = cleaned.replaceAll('*', ''); 
+    // Remove hashtags (#) often used for headers
+    cleaned = cleaned.replaceAll('#', '');
+    // Remove underscores (_) often used for italics
+    cleaned = cleaned.replaceAll('_', '');
+
+    // 2. Remove Emojis (Robust Regex)
     try {
-      // Remove emojis using a simpler regex that won't break
-      cleaned = cleaned.replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}]', unicode: true), '');
-      cleaned = cleaned.replaceAll(RegExp(r'[\u{2600}-\u{26FF}]', unicode: true), '');
-      cleaned = cleaned.replaceAll(RegExp(r'[\u{2700}-\u{27BF}]', unicode: true), '');
+      // Basic ranges for common emojis
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{1F600}-\u{1F64F}]', unicode: true), ''); // Emoticons
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{1F300}-\u{1F5FF}]', unicode: true), ''); // Simbols & Pictographs
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{1F680}-\u{1F6FF}]', unicode: true), ''); // Transport & Map
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{1F1E0}-\u{1F1FF}]', unicode: true), ''); // Flags
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{2600}-\u{26FF}]', unicode: true), '');   // Misc symbols
+      cleaned = cleaned.replaceAll(RegExp(r'[\u{2700}-\u{27BF}]', unicode: true), '');   // Dingbats
     } catch (e) {
-      // If regex fails, just continue with original text
-      print("TTS: Emoji removal failed, using original text");
+      if (kDebugMode) print("TTS: Emoji removal warning: $e");
     }
 
-    // Clean up extra spaces and normalize
+    // 3. Clean up whitespace
     cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ');
-    cleaned = cleaned.trim();
-
-    // Safety check: if cleaning removed everything, use original
-    if (cleaned.isEmpty && input.trim().isNotEmpty) {
-      cleaned = input.trim();
-    }
-
-    return cleaned;
+    return cleaned.trim();
   }
 
   Future<void> _setAwaitOptions() async {
-    await flutterTts.awaitSpeakCompletion(true);
+    // Await completion causes issues on some Web browsers/versions, leading to "breaking" voice
+    // Disable it for Web to ensure smooth playback
+    if (!kIsWeb) {
+      await flutterTts.awaitSpeakCompletion(true);
+    }
   }
 
   Future<void> stop() async {

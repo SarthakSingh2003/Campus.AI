@@ -1,4 +1,3 @@
-// lib/screens/chat_screen.dart (redesigned)
 import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
@@ -7,8 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:translator/translator.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:kira_college_ai/api_key.dart';
+import 'package:kira_college_ai/services/ollama_service.dart';
 import 'package:kira_college_ai/components/assistant_message.dart';
 import 'package:kira_college_ai/components/user_message.dart';
 
@@ -46,6 +44,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   final SpeechToText speechToTextInstance = SpeechToText();
   final GoogleTranslator translator = GoogleTranslator();
   final ChatHistoryService _historyService = ChatHistoryService();
+  final OllamaService _ollamaService = OllamaService();
 
   String recordedAudioString = "";
   String translatedString = "";
@@ -78,9 +77,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late Animation<double> _waveAnimation;
   late Animation<double> _particleAnimation;
 
-  // Gemini Pro model instance
-  late final GenerativeModel model;
-
   List<Map<String, String>> messages = [];
   bool isLoading = false;
   bool isRecording = false;
@@ -92,57 +88,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   var _assistantResponse = "";
   String errorMessage = "";
-
-  // Simple rate limiter: ensure at least this duration between API calls
-  DateTime _lastApiCallAt = DateTime.fromMillisecondsSinceEpoch(0);
-  final Duration _minGapBetweenCalls = const Duration(seconds: 3);
-
-  // Centralized model call with retries and exponential backoff
-  Future<GenerateContentResponse> _safeGenerate(String prompt) async {
-    // Honor a minimal gap between calls to avoid RPM bursts
-    final now = DateTime.now();
-    final elapsed = now.difference(_lastApiCallAt);
-    if (elapsed < _minGapBetweenCalls) {
-      await Future.delayed(_minGapBetweenCalls - elapsed);
-    }
-
-    int attempt = 0;
-    const int maxAttempts = 3;
-    Duration backoff = const Duration(seconds: 2);
-
-    while (true) {
-      attempt++;
-      try {
-        final resp = await model
-            .generateContent([Content.text(prompt)])
-            .timeout(const Duration(seconds: 30), onTimeout: () {
-          throw TimeoutException('API request timed out');
-        });
-        _lastApiCallAt = DateTime.now();
-        return resp;
-      } catch (e) {
-        final message = e.toString().toLowerCase();
-        final isQuota = message.contains('quota') || message.contains('429');
-        if (attempt >= maxAttempts || !isQuota) {
-          rethrow;
-        }
-        // If explicit per-minute quota, wait for a full window (~65s)
-        if (message.contains('per minute')) {
-          if (mounted) {
-            setState(() {
-              _assistantResponse = 'I hit a temporary rate limit. Waiting a minute and I’ll try again automatically.';
-              messages.add({'role': 'assistant', 'content': _assistantResponse});
-            });
-          }
-          await Future.delayed(const Duration(seconds: 65));
-        } else {
-          // Exponential backoff
-          await Future.delayed(backoff);
-          backoff *= 2;
-        }
-      }
-    }
-  }
 
   @override
   void initState() {
@@ -156,26 +101,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       messages = List<Map<String, String>>.from(widget.chatHistory!.messages);
     } else {
       messages = List.from(dummyMessages);
-    }
-
-    // Initialize Gemini model
-    try {
-      // Use the model returned by ListModels
-      model = GenerativeModel(
-        model: 'gemini-2.5-flash',
-        apiKey: geminiApiKey,
-        generationConfig: GenerationConfig(
-          temperature: 0.8,
-          topP: 0.9,
-          topK: 40,
-          maxOutputTokens: 4096, // Increased to allow complete responses
-        ),
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print("Error initializing Gemini model: $e");
-      }
-      errorMessage = "Error initializing AI model. Please restart the app.";
     }
 
     initializeSpeechToText();
@@ -323,7 +248,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<bool> _checkConnectivity() async {
-    return true;
+    return true; // We assume local connectivity for Ollama, but user might be offline. 
   }
 
   Future<void> getChatResponse(String message) async {
@@ -332,11 +257,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       errorMessage = "";
     });
 
+    // Check connectivity - even for local Ollama, we need network stack (localhost)
+    // but we can skip valid internet check if we want offline. 
+    // However, if using emulator 10.0.2.2, it requires network.
     bool hasInternet = await _checkConnectivity();
     if (!hasInternet) {
       setState(() {
         _assistantResponse =
-            "No internet connection. Please check your network and try again.";
+            "No connection. Please check your network and try again.";
         messages.add({'role': 'assistant', 'content': _assistantResponse});
         isLoading = false;
       });
@@ -351,87 +279,44 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       bool isHindi = _isHindiText(message);
       
       // IMPORTANT: Set language code based on user's input language
-      // If Hindi is detected, use Hindi. Otherwise, explicitly use English.
       if (isHindi) {
         selectedLanguageCode = 'hi';
       } else {
-        // Explicitly set to English for English questions
         selectedLanguageCode = 'en';
       }
 
-      // First, check if the query is related to UIT/college information
-      // Only use college data service for English queries
-      String collegeResponse = '';
-      if (!isHindi) {
-        collegeResponse = CollegeDataService.getPersonalizedResponse(message);
+      // 1. Prepare Query for Backend (Translate to English if needed for RAG)
+      String queryForBackend = message;
+      if (isHindi) {
+         try {
+           var translation = await translator.translate(message, to: 'en');
+           queryForBackend = translation.text;
+         } catch (e) {
+           if (kDebugMode) print("Translation error (Input): $e");
+         }
       }
+
+      // 2. Call Backend (RAG Logic)
+      // The backend uses English knowledge base, so it returns English.
+      String responseText = await _ollamaService.generateResponse(queryForBackend);
       
-      if (collegeResponse.isNotEmpty && !isHindi) {
-        // If it's a college-related query and NOT Hindi, use English response
-        _assistantResponse = "Hi! I'm KIRA, your AI assistant for United Institute of Technology Prayagraj. $collegeResponse";
-      } else if (message.contains('ನಾನು ಒಂಟಿಯಾಗಿ') || message.contains('ಇಲ್ಲ')) {
-        _assistantResponse = "ನಾನು ಇಲ್ಲಿದ್ದೇನೆ ನಿನಗಾಗಿ...";
-      } else if (message.contains('sleepless') ||
-          message.contains('feeling sleepless')) {
-        _assistantResponse = "Hey, I've been observing you...";
-      } else if (isHindi) {
-        // Handle Hindi responses with KIRA's personality
-        final prompt =
-            "You are KIRA, the helpful assistant for United Institute of Technology Prayagraj. "
-            "The user asked in Hindi. You MUST respond entirely in Hindi (हिंदी) using Devanagari script. "
-            "Do NOT use English words except for proper nouns like 'KIRA', 'UIT', 'United Institute of Technology Prayagraj'. "
-            "Respond with a warm, natural, human tone. Avoid saying phrases like 'as an AI'. "
-            "Be concise, empathetic, and clear. Introduce yourself casually as KIRA and help with: $message. "
-            "Prefer college-related, actionable info when relevant. Remember: Respond ONLY in Hindi. "
-            "Make sure to provide complete, full responses without cutting off mid-sentence.";
-
-        final response = await _safeGenerate(prompt);
-
-        if (response.text != null && response.text!.isNotEmpty) {
-          _assistantResponse = response.text!;
-          if (kDebugMode && !_isResponseComplete(_assistantResponse)) {
-            print("Warning: Response may appear incomplete");
-          }
-        } else {
-          _assistantResponse =
-              "माफ़ करें, मैं उत्तर नहीं दे पाया। कृपया फिर से कोशिश करें।";
-        }
-      } else {
-        // Handle English responses with KIRA's personality
-        // IMPORTANT: Explicitly instruct to reply in English only
-        final prompt =
-            "You are KIRA, the helpful assistant for United Institute of Technology Prayagraj. "
-            "The user asked in English. You MUST respond entirely in English. "
-            "Do NOT use Hindi or any other language. "
-            "Reply with a warm, human, conversational tone. "
-            "Avoid robotic phrasing or mentioning that you're an AI. "
-            "Introduce yourself casually as KIRA and help with: $message. "
-            "When relevant, focus on UIT topics (courses, placements, infra, student life) and give concise, actionable guidance. "
-            "Make sure to provide complete, full responses without cutting off mid-sentence.";
-
-        final response = await _safeGenerate(prompt);
-
-        if (response.text != null && response.text!.isNotEmpty) {
-          _assistantResponse = response.text!;
-          if (kDebugMode && !_isResponseComplete(_assistantResponse)) {
-            print("Warning: Response may appear incomplete");
-          }
-        } else {
-          _assistantResponse = "Sorry, I couldn't generate a response.";
-        }
+      // 3. Process Response (Translate back to Hindi if needed)
+      if (isHindi) {
+         try {
+           var translation = await translator.translate(responseText, to: 'hi');
+           responseText = translation.text;
+         } catch (e) {
+           if (kDebugMode) print("Translation error (Output): $e");
+         }
       }
+
+      _assistantResponse = responseText;
     } catch (e) {
-      // Show a clearer message and log details in debug
-      String friendly = 'I’m having trouble reaching the server right now. Please try again.';
-      if (e is GenerativeAIException) {
-        friendly = 'Request failed: ${e.message}';
-      } else if (e is TimeoutException) {
-        friendly = 'The request is taking too long. Try again in a moment.';
+      String friendly = "I'm having trouble reaching the AI brain right now. Please check if Ollama is running.";
+      if (kDebugMode) {
+        print("Ollama Error: $e");
       }
       _assistantResponse = friendly;
-      if (kDebugMode) {
-        print("Gemini API Error: $e");
-      }
     } finally {
       if (mounted) {
         setState(() {
@@ -440,44 +325,35 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         });
 
         if (_assistantResponse.isNotEmpty) {
-          // Ensure mic is released before TTS (Android audio focus)
           try { await speechToTextInstance.stop(); } catch (_) {}
-          // Give the system a brief moment to release mic and grant audio focus
           await Future.delayed(const Duration(milliseconds: 200));
-          // Decide language for TTS based on the language code set from user's input
-          // Use selectedLanguageCode which is set based on user's question language
+          
           final bool speakHindi = selectedLanguageCode == 'hi';
           try {
-            // Use the language code that matches the user's input language
             final langToUse = speakHindi ? 'hi-IN' : (langSetting[selectedLanguageCode] ?? 'en-IN');
-            print("Chat: Setting TTS language to: $langToUse (User asked in: ${selectedLanguageCode == 'hi' ? 'Hindi' : 'English'})");
             await ttsService.setLanguage(langToUse);
-            // Wait for language to be fully set before configuring voice
             await Future.delayed(const Duration(milliseconds: 150));
             await ttsService.setFeminineVoiceIfAvailable();
-            // Wait a bit more to ensure TTS engine is ready
             await Future.delayed(const Duration(milliseconds: 150));
-            // Re-verify language is set correctly before speaking
-            if (speakHindi) {
-              await ttsService.setLanguage('hi-IN');
-              print("Chat: Re-confirmed Hindi language before speaking");
-            } else {
-              await ttsService.setLanguage('en-IN');
-              print("Chat: Re-confirmed English language before speaking");
-            }
           } catch (e) {
             if (kDebugMode) {
               print("TTS setup error: $e");
             }
           }
-          await ttsService.speak(_assistantResponse.trim());
+          // Start speaking but DO NOT await it, so we can listen for barge-in immediately
+          // TtsService is configured to await completion, so using .then() lets us handle post-speech logic
+          ttsService.speak(_assistantResponse.trim()).then((_) {
+             // Logic to run after speech finishes successfully (if not interrupted)
+             // We can ensure listening is active here too
+          });
           
-          // Restart wake-word listening after TTS completes (handled via TTS service completion)
-          // We'll restart it after a delay to ensure TTS has finished
-          Future.delayed(const Duration(seconds: 2), () async {
-            // Wait a bit more to ensure TTS is fully done
-            await Future.delayed(const Duration(milliseconds: 500));
+          // Restart wake-word listening PROACTIVELY to allow barge-in
+          // We wait a brief moment for TTS to initialize
+          Future.delayed(const Duration(milliseconds: 500), () async {
             if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+              if (kDebugMode) {
+                print("Starting barge-in listener...");
+              }
               _startWakeWordListening();
             }
           });
@@ -489,54 +365,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   // Helper method to check if response is complete
   bool _isResponseComplete(String response) {
     if (response.isEmpty) return false;
-    
-    // Check if response ends with proper punctuation
     final trimmed = response.trim();
     if (trimmed.isEmpty) return false;
-    
-    // Check for common sentence endings
     final lastChar = trimmed[trimmed.length - 1];
     if (lastChar == '.' || lastChar == '!' || lastChar == '?' || 
         lastChar == '।' || lastChar == '!' || lastChar == '?') {
       return true;
     }
-    
-    // Check if it ends with common incomplete patterns
-    final lowerResponse = trimmed.toLowerCase();
-    if (lowerResponse.endsWith(' and') || 
-        lowerResponse.endsWith(' but') ||
-        lowerResponse.endsWith(' or') ||
-        lowerResponse.endsWith(' the') ||
-        lowerResponse.endsWith(' a') ||
-        lowerResponse.endsWith(' an') ||
-        lowerResponse.endsWith(' और') ||
-        lowerResponse.endsWith(' लेकिन') ||
-        lowerResponse.endsWith(' या')) {
-      return false;
-    }
-    
-    // If response is very short, assume it might be complete
-    if (trimmed.length < 50) return true;
-    
-    // Default to assuming it's complete if no obvious incomplete patterns
-    return true;
+    return true; // Default true for Ollama for now
   }
 
   // Helper method to detect Hindi text (both Devanagari and Romanized)
   bool _isHindiText(String text) {
-    // Check for Hindi characters (Devanagari script)
     RegExp hindiRegex = RegExp(r'[\u0900-\u097F]');
     if (hindiRegex.hasMatch(text)) {
       return true;
     }
     
-    // Check for common Romanized Hindi words
     final romanizedHindiWords = [
-      'kaun', 'kya', 'kahan', 'kab', 'kaise', 'kyun', 'hain', 'hai', 'hoga', 'hogi',
-      'main', 'tum', 'aap', 'hum', 'unka', 'unke', 'uska', 'uski', 'mera', 'meri',
+      'kaun', 'kahan', 'kab', 'kaise', 'kyun', 'hain', 'hai', 'hoga', 'hogi',
+      'tum', 'aap', 'hum', 'unka', 'unke', 'uska', 'uski', 'mera', 'meri',
       'namaste', 'dhanyavad', 'shukriya', 'kripya', 'mujhe', 'tujhe', 'ko', 'se',
-      'mein', 'par', 'tak', 'bhi', 'bhi', 'aur', 'ya', 'lekin', 'magar', 'phir',
-      'ab', 'aaj', 'kal', 'parson', 'pehle', 'baad', 'sab', 'sabse', 'kuch', 'koi'
+      'mein', 'tak', 'bhi', 'aur', 'lekin', 'magar', 'phir',
+       'aaj', 'parson', 'pehle', 'baad', 'sab', 'sabse', 'kuch', 'koi'
     ];
     
     final lowerText = text.toLowerCase();
@@ -571,44 +422,24 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
 
     try {
-      // Check if text is in Hindi first (both Devanagari and Romanized)
       if (_isHindiText(text)) {
         selectedLanguageCode = 'hi';
-        if (kDebugMode) {
-          print("Chat: Hindi detected (Romanized or Devanagari), setting language to Hindi");
-        }
         setState(() {
           messages = List<Map<String, String>>.from(messages);
           messages.add({'role': 'user', 'content': text});
         });
         await getChatResponse(text.toLowerCase());
-        
-        // Auto-save conversation after each exchange
         _autoSaveConversation();
         return;
       }
 
-      // For non-Hindi text, explicitly set to English
       selectedLanguageCode = 'en';
-      if (kDebugMode) {
-        print("Chat: English detected, setting language to English");
-      }
-
-      // Optional: Use language detection for other languages in the future
-      // For now, default to English for all non-Hindi input
-      String detectedLang = await detectLanguage(text);
-      if (kDebugMode) {
-        print("Detected Language: $detectedLang (but using English for response)");
-      }
-
       setState(() {
         messages = List<Map<String, String>>.from(messages);
         messages.add({'role': 'user', 'content': text});
       });
 
       await getChatResponse(text.toLowerCase());
-      
-      // Auto-save conversation after each exchange
       _autoSaveConversation();
     } catch (e) {
       if (kDebugMode) {
@@ -701,6 +532,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _isSilenceDetected = false;
       _silenceTimer?.cancel();
     });
+
+    // Race condition check: If already checking or listening, stop first
+    if (speechToTextInstance.isListening) {
+      await speechToTextInstance.stop();
+      // Brief delay to allow state cleanup
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
 
     try {
       await speechToTextInstance.listen(
@@ -807,81 +645,91 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _startWakeWordListening() async {
-    if (_isWakeWordListening || isRecording || isLoading) {
-      return;
-    }
+    // If already recording user query or loading response, we usually don't want to restart wake word listening
+    // UNLESS we want to support barge-in.
+    // For barge-in, we need to allow wake word listening even if TTS is playing (though TTS usually requires mic focus).
+    // Note: On many mobile devices, playing TTS and listening to Mic simultaneously is tricky (echo cancellation).
+    
+    if (_isWakeWordListening) return;
+    if (isRecording) return; // Don't listen for wake word if already recording user input
 
     // Check if speech recognition is available
     if (!speechToTextInstance.isAvailable) {
-      if (kDebugMode) {
-        print("Speech recognition not available for wake-word listening");
-      }
       return;
     }
 
     // Check microphone permission
     PermissionStatus microphoneStatus = await Permission.microphone.status;
-    if (microphoneStatus.isDenied) {
-      microphoneStatus = await Permission.microphone.request();
-    }
+    if (microphoneStatus.isGranted) {
+      setState(() {
+        _isWakeWordListening = true;
+        _wakeWordBuffer = "";
+      });
 
-    if (!microphoneStatus.isGranted) {
-      if (kDebugMode) {
-        print("Microphone permission not granted for wake-word listening");
-      }
-      return;
-    }
+      try {
+        // Safety check: Stop if already active to prevent InvalidStateError
+        if (speechToTextInstance.isListening) {
+           await speechToTextInstance.stop();
+           await Future.delayed(const Duration(milliseconds: 50));
+        }
 
-    setState(() {
-      _isWakeWordListening = true;
-      _wakeWordBuffer = "";
-    });
-
-    try {
-      if (kDebugMode) {
-        print("Starting wake-word listening...");
-      }
-      
-      await speechToTextInstance.listen(
-        onResult: (result) {
-          if (_isWakeWordListening && !isRecording) {
-            String text = result.recognizedWords.toLowerCase().trim();
-            if (text.isNotEmpty) {
-              _wakeWordBuffer = text;
-              if (_checkForWakeWord(text)) {
-                _stopWakeWordListening();
-                Future.delayed(const Duration(milliseconds: 300), () {
+        await speechToTextInstance.listen(
+          onResult: (result) async {
+            if (_isWakeWordListening && !isRecording) {
+              String text = result.recognizedWords.toLowerCase().trim();
+              if (text.isNotEmpty) {
+                _wakeWordBuffer = text;
+                if (_checkForWakeWord(text)) {
+                  // Wake word detected! 
+                  
+                  // 1. Stop wake word listening
+                  await _stopWakeWordListening();
+                  
+                  // 2. Stop any current TTS (Barge-in capability)
+                  await ttsService.stop();
+                  
+                  // 3. Play Greeting
+                  // We need to briefly wait for mic to release before TTS
+                  await Future.delayed(const Duration(milliseconds: 200));
+                  
+                  // Set English voice for greeting
+                   await ttsService.setLanguage('en-IN');
+                   await ttsService.setFeminineVoiceIfAvailable();
+                   
+                   await ttsService.speak("Hello! How may I help you?");
+                   
+                   // 4. Wait for Greeting to vaguely finish (approx 2 seconds)
+                   // A better way would be a completion callback, but a delay is simpler for now.
+                   // Or we can just start listening immediately and let echo cancellation handle it, 
+                   // but usually it's better to wait.
+                   await Future.delayed(const Duration(seconds: 2));
+                   
+                   // 5. Start listening for the actual query
                   if (mounted && !isRecording) {
                     startListeningNow();
                   }
-                });
+                }
               }
             }
+          },
+          listenFor: const Duration(seconds: 60),
+          pauseFor: const Duration(seconds: 5),
+          partialResults: true,
+          cancelOnError: false,
+          listenMode: ListenMode.dictation,
+          onSoundLevelChange: (level) {},
+        );
+      } catch (e) {
+        setState(() {
+          _isWakeWordListening = false;
+        });
+        // Retry logic
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+            _startWakeWordListening();
           }
-        },
-        listenFor: const Duration(seconds: 60),
-        pauseFor: const Duration(seconds: 5),
-        partialResults: true,
-        cancelOnError: false,
-        listenMode: ListenMode.dictation, // Use dictation mode for continuous listening
-        onSoundLevelChange: (level) {
-          // Minimal processing for wake-word detection
-        },
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print("Error starting wake-word listening: $e");
+        });
       }
-      setState(() {
-        _isWakeWordListening = false;
-      });
-      
-      // Retry after a delay
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
-          _startWakeWordListening();
-        }
-      });
     }
   }
 
@@ -900,30 +748,19 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _isWakeWordListening = false;
       _wakeWordBuffer = "";
     });
-    
-    if (kDebugMode) {
-      print("Stopped wake-word listening");
-    }
   }
 
   void onSpeechToTextResult(SpeechRecognitionResult recognitionResult) {
     // This handler is only for normal recording mode, not wake-word detection
     if (_isWakeWordListening) {
-      return; // Wake-word detection uses its own handler
+      return; 
     }
     
     setState(() {
       recordedAudioString = recognitionResult.recognizedWords;
     });
 
-    if (kDebugMode) {
-      print("Speech Result: $recordedAudioString");
-      print("Final: ${recognitionResult.finalResult}");
-    }
-
-    // If we have a final result and it's not empty, process it
     if (recognitionResult.finalResult && recordedAudioString.isNotEmpty) {
-      // Small delay to ensure the result is fully processed
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted && isRecording) {
           stopListeningNow();
