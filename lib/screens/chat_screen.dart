@@ -478,7 +478,17 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         },
         onStatus: (status) {
           if (kDebugMode) {
-            print("Speech recognition status: $status");
+             print("Speech Status: $status");
+          }
+          // If the listener stops (done/notListening) but we WANT to be listening, restart it.
+          if ((status == 'notListening' || status == 'done') && _isWakeWordListening && !isRecording) {
+             // Force flag to false so _startWakeWordListening doesn't bail out
+             if (mounted) {
+               setState(() {
+                 _isWakeWordListening = false;
+               });
+               _safeRestartWakeWord();
+             }
           }
         },
       );
@@ -688,7 +698,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
         // Watchdog: Ensure listener is actually running
         _wakeWordWatchdog?.cancel();
-        _wakeWordWatchdog = Timer.periodic(const Duration(seconds: 10), (timer) {
+        _wakeWordWatchdog = Timer.periodic(const Duration(seconds: 5), (timer) {
           if (!_isWakeWordListening) {
              timer.cancel();
              return;
@@ -703,6 +713,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           onResult: (result) async {
             if (_isWakeWordListening && !isRecording) {
               String text = result.recognizedWords.toLowerCase().trim();
+              if (kDebugMode) print("WakeWord Listener Heard: '$text'");
               if (text.isNotEmpty) {
                 _wakeWordBuffer = text;
                 if (_checkForWakeWord(text)) {
@@ -735,10 +746,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             }
           },
           listenFor: const Duration(seconds: 30),
-          pauseFor: const Duration(seconds: 4), // Balanced pause duration
+          pauseFor: const Duration(seconds: 5), // Relaxed pause for stability
           partialResults: true,
           cancelOnError: false,
-          listenMode: ListenMode.dictation,
+          listenMode: ListenMode.dictation, // Smoother for continuous listening
           onSoundLevelChange: (level) {},
         );
       } catch (e) {
@@ -756,9 +767,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   void _safeRestartWakeWord() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && !isRecording && !isLoading && !_isWakeWordListening) {
+    // Increased delay to 1.5s to allow Bluetooth SCO to settle/disconnect properly
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted && !isRecording && !isLoading) {
          if (kDebugMode) print("Restarting wake word listener...");
+         // Ensure flag is reset to allow re-entry
+         setState(() {
+           _isWakeWordListening = false;
+         });
         _startWakeWordListening();
       }
     });

@@ -1,5 +1,7 @@
+import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:kira_college_ai/constant/college_data.dart';
 
 class GeminiService {
   // Use the API Key provided by the user
@@ -23,7 +25,7 @@ class GeminiService {
         final model = GenerativeModel(
           model: modelName,
           apiKey: _apiKey,
-          systemInstruction: Content.system("You are KIRA, an AI assistant for United Institute of Technology. Keep your answers concise, short, and to the point. Only elaborate if explicitly asked."),
+          systemInstruction: Content.system("You are KIRA, an AI assistant for United Institute of Technology. Keep your answers concise, short, and to the point. Only elaborate if explicitly asked.\n\nHere is the official data about the college:\n$collegeData"),
           generationConfig: GenerationConfig(
             temperature: 0.7,
             topK: 40,
