@@ -18,11 +18,18 @@ class ChatHistoryService {
       return [];
     }
 
-    List<dynamic> historiesMap = jsonDecode(chatHistoryJson);
-    return historiesMap
-        .map((history) => ChatHistory.fromMap(history))
-        .toList()
-      ..sort((a, b) => b.timestamp.compareTo(a.timestamp)); // Sort by newest first
+    try {
+      List<dynamic> historiesMap = jsonDecode(chatHistoryJson);
+      return historiesMap
+          .map((history) => ChatHistory.fromMap(history))
+          .toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp)); // Sort by newest first
+    } catch (e) {
+      print('Error parsing chat histories: $e');
+      // If the data is corrupt, clear it
+      await prefs.remove(_storageKey);
+      return [];
+    }
   }
 
   // Save a new chat history

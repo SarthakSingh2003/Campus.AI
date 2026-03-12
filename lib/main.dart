@@ -12,6 +12,8 @@ import 'package:kira_college_ai/screens/chat_history_screen.dart';
 import 'package:kira_college_ai/services/auth_service.dart';
 import 'package:kira_college_ai/screens/login_screen.dart';
 import 'package:kira_college_ai/screens/signup_screen.dart';
+import 'package:kira_college_ai/screens/phone_login_screen.dart';
+import 'package:kira_college_ai/screens/otp_verification_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 
@@ -61,6 +63,8 @@ class MyApp extends StatelessWidget {
         '/chatHistory': (context) => const ChatHistoryScreen(),
         '/login': (context) => const LoginScreen(),
         '/signup': (context) => const SignupScreen(),
+        '/phoneLogin': (context) => const PhoneLoginScreen(),
+        '/otpVerification': (context) => const OtpVerificationScreen(),
       },
     );
   }

@@ -53,6 +53,10 @@ dependencies:
   permission_handler: ^12.0.0+1
   google_generative_ai: ^0.4.7
   flutter_dotenv: ^6.0.0
+  path_provider: ^2.1.2
+  flutter_secure_storage: ^9.0.0
+  image: ^4.1.7
+  rename: ^3.1.0
 
 
   

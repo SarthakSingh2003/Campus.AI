@@ -132,7 +132,7 @@ class _SpaceScaffoldState extends State<SpaceScaffold>
                         ),
                       ),
 
-                      // Frosted content container for consistency
+                      // Frosted content container with premium glassmorphism
                       Expanded(
                         child: Padding(
                           padding: EdgeInsets.fromLTRB(
@@ -142,16 +142,36 @@ class _SpaceScaffoldState extends State<SpaceScaffold>
                             20,
                           ),
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(28),
                             child: BackdropFilter(
-                              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.06),
-                                  borderRadius: BorderRadius.circular(24),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.12),
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.white.withOpacity(0.12),
+                                      Colors.white.withOpacity(0.06),
+                                    ],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
                                   ),
+                                  borderRadius: BorderRadius.circular(28),
+                                  border: Border.all(
+                                    width: 1.5,
+                                    color: Colors.white.withOpacity(0.18),
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: theme.primary.withOpacity(0.08),
+                                      blurRadius: 25,
+                                      spreadRadius: -3,
+                                    ),
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.15),
+                                      blurRadius: 30,
+                                      offset: const Offset(0, 10),
+                                    ),
+                                  ],
                                 ),
                                 child: widget.child,
                               ),

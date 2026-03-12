@@ -1,42 +1,85 @@
 {
   "project_info": {
-    "project_number": "745225092320",
-    "project_id": "aiassistant-f1260",
-    "storage_bucket": "aiassistant-f1260.firebasestorage.app"
+    "project_number": "270760836618",
+    "project_id": "kira-ai-7ffe5",
+    "storage_bucket": "kira-ai-7ffe5.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:745225092320:android:97672e8b72c65503c6a485",
+        "mobilesdk_app_id": "1:270760836618:android:e8a84a4230776f843f29f3",
         "android_client_info": {
-          "package_name": "com.bhumiqai.voice_chatbot_assistant"
+          "package_name": "com.bhumiqai.campusai"
         }
       },
       "oauth_client": [
         {
-          "client_id": "745225092320-8goaklj300to2klgteeejsstlda96794.apps.googleusercontent.com",
+          "client_id": "270760836618-ecst64ndha1t6tgfnukqoksm0k449ild.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.bhumiqai.voice_chatbot_assistant",
+            "package_name": "com.bhumiqai.campusai",
             "certificate_hash": "6895a21c20e0e315f64cfeb3284705c2bdb533ed"
           }
         },
         {
-          "client_id": "745225092320-hkpsuerr53jav9u0eobfrifsk0tn5lop.apps.googleusercontent.com",
+          "client_id": "270760836618-1fj5p165e0t00mg69jgphvn699ae83r4.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyCGYhK1DZQ0yzng56-E7oAd5mv13MqTp8g"
+          "current_key": "AIzaSyAmWZBdt1ucJtY2OxxqWExe5tQwcXUdOZ4"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "745225092320-hkpsuerr53jav9u0eobfrifsk0tn5lop.apps.googleusercontent.com",
+              "client_id": "270760836618-1fj5p165e0t00mg69jgphvn699ae83r4.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "270760836618-h1brp93q1h42pr8j5tkdrguc1v93n8ns.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.bhumiqai.voiceChatbotAssistant"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:270760836618:android:539d92998f6c42d53f29f3",
+        "android_client_info": {
+          "package_name": "com.bhumiqai.voice_chatbot_assistant"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "270760836618-1fj5p165e0t00mg69jgphvn699ae83r4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmWZBdt1ucJtY2OxxqWExe5tQwcXUdOZ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "270760836618-1fj5p165e0t00mg69jgphvn699ae83r4.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "270760836618-h1brp93q1h42pr8j5tkdrguc1v93n8ns.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.bhumiqai.voiceChatbotAssistant"
+              }
             }
           ]
         }

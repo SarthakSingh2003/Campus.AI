@@ -27,7 +27,7 @@ class AuthService extends ChangeNotifier {
 
   // Web OAuth Client ID - Get this from Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs > Web client
   // Format: PROJECT_NUMBER-xxxxx.apps.googleusercontent.com
-  static const String _webClientId = '745225092320-hkpsuerr53jav9u0eobfrifsk0tn5lop.apps.googleusercontent.com';
+  static const String _webClientId = '270760836618-1fj5p165e0t00mg69jgphvn699ae83r4.apps.googleusercontent.com';
 
   GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: [
@@ -36,6 +36,7 @@ class AuthService extends ChangeNotifier {
     ],
     // For web platform, we need to provide the clientId
     clientId: kIsWeb ? _webClientId : null,
+    serverClientId: _webClientId, // This helps getting idToken on Android
   );
 
   AuthService() {
@@ -96,6 +97,7 @@ class AuthService extends ChangeNotifier {
         _googleSignIn = GoogleSignIn(
           scopes: ['email','profile'],
           clientId: kIsWeb ? _webClientId : null,
+          serverClientId: _webClientId,
         );
       }
       final account = await _googleSignIn.signIn();
@@ -157,6 +159,84 @@ class AuthService extends ChangeNotifier {
       rethrow;
     }
   }
+
+  // --- Phone Authentication Methods ---
+
+  Future<void> verifyPhoneNumber({
+    required String phoneNumber,
+    required Function(String verificationId, int? resendToken) codeSent,
+    required Function(fb.FirebaseAuthException e) verificationFailed,
+  }) async {
+    try {
+      await fb.FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        verificationCompleted: (fb.PhoneAuthCredential credential) async {
+          // Auto-resolution (often works on Android)
+          try {
+            final result = await fb.FirebaseAuth.instance.signInWithCredential(credential);
+            final fbUser = result.user;
+            if (fbUser != null) {
+              final user = AuthUser(
+                userId: fbUser.uid,
+                displayName: fbUser.displayName ?? 'Phone User',
+                email: fbUser.email,
+              );
+              _currentUser = user;
+              await _saveToStorage(user);
+              notifyListeners();
+            }
+          } catch (e) {
+            if (kDebugMode) print('Auto sign-in failed: $e');
+          }
+        },
+        verificationFailed: verificationFailed,
+        codeSent: codeSent,
+        codeAutoRetrievalTimeout: (String verificationId) {},
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        print('Phone verification failed to start: $e');
+      }
+      rethrow;
+    }
+  }
+
+  Future<AuthUser?> signInWithOTP(String verificationId, String smsCode) async {
+    try {
+      // Create a PhoneAuthCredential with the code
+      final fb.PhoneAuthCredential credential = fb.PhoneAuthProvider.credential(
+        verificationId: verificationId,
+        smsCode: smsCode,
+      );
+
+      // Sign the user in (or link) with the credential
+      final result = await fb.FirebaseAuth.instance.signInWithCredential(credential);
+      final fbUser = result.user;
+      
+      if (fbUser == null) {
+        throw Exception('Failed to sign in via OTP');
+      }
+
+      final user = AuthUser(
+        userId: fbUser.uid,
+        displayName: fbUser.displayName ?? 'Phone User',
+        email: fbUser.email,
+      );
+
+      _currentUser = user;
+      await _saveToStorage(user);
+      notifyListeners();
+      return user;
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('OTP Sign In Failed: $e');
+      }
+      rethrow;
+    }
+  }
+
+  // -------------------------------------
 
   Future<AuthUser?> signUpWithEmail(String name, String email, String password) async {
     try {

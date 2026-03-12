@@ -18,11 +18,9 @@ class ChatHistory {
       id: map['id'],
       timestamp: DateTime.parse(map['timestamp']),
       title: map['title'],
-      messages: List<Map<String, String>>.from(
-        (map['messages'] as List).map((message) =>
-        Map<String, String>.from(message)
-        ),
-      ),
+      messages: (map['messages'] as List?)?.map((message) {
+        return Map<String, String>.from(message as Map);
+      }).toList() ?? [],
     );
   }
 

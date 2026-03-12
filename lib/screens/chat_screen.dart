@@ -59,7 +59,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Timer? _wakeWordWatchdog;
   String _wakeWordBuffer = "";
   static const List<String> _wakeWords = [
-    'hello',
+    'hello united',
     'hi',
     'namaste',
     'hey',

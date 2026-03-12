@@ -21,7 +21,6 @@ class UniverseBackground extends StatelessWidget {
       child: Stack(
         children: [
           if (theme.showSpaceElements) const _StarsLayer(),
-          if (theme.showSpaceElements) const _NebulaGlow(),
           child,
         ],
       ),
@@ -29,6 +28,7 @@ class UniverseBackground extends StatelessWidget {
   }
 }
 
+// Simple white stars with subtle twinkling
 class _StarsLayer extends StatefulWidget {
   const _StarsLayer();
   @override
@@ -74,11 +74,17 @@ class _StarsPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rnd = math.Random(7);
-    final starPaint = Paint()..color = Colors.white.withOpacity(0.7);
+    
+    // Simple white stars with subtle twinkling
     for (int i = 0; i < 120; i++) {
       final x = rnd.nextDouble() * size.width;
       final y = rnd.nextDouble() * size.height;
-      final r = (rnd.nextDouble() * 1.5) + (math.sin(progress * 2 * math.pi + i) * 0.5 + 0.5);
+      final twinkle = math.sin(progress * 2 * math.pi + i) * 0.3 + 0.7;
+      final baseSize = rnd.nextDouble() * 1.5;
+      final r = baseSize * twinkle;
+      
+      // Simple white stars
+      final starPaint = Paint()..color = Colors.white.withOpacity(0.6 * twinkle);
       canvas.drawCircle(Offset(x, y), r, starPaint);
     }
   }
@@ -86,30 +92,3 @@ class _StarsPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _StarsPainter oldDelegate) => true;
 }
-
-class _NebulaGlow extends StatelessWidget {
-  const _NebulaGlow();
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Align(
-        alignment: const Alignment(0.8, -0.6),
-        child: Container(
-          width: 320,
-          height: 320,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [
-                Colors.purpleAccent.withOpacity(0.22),
-                Colors.deepPurple.withOpacity(0.0),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-

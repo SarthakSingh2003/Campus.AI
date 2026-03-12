@@ -16,7 +16,7 @@ class AssistantMessage extends StatelessWidget {
           Expanded(
             child: ClipRRect(
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(0),
+                topLeft: Radius.circular(4),
                 topRight: Radius.circular(20),
                 bottomLeft: Radius.circular(20),
                 bottomRight: Radius.circular(20),
@@ -24,33 +24,19 @@ class AssistantMessage extends StatelessWidget {
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                 child: Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        const Color(0xFF4F46E5).withOpacity(0.2),
-                        const Color(0xFF7C3AED).withOpacity(0.1),
-                      ],
-                    ),
+                    color: const Color(0xFF6366F1).withOpacity(0.15),
                     borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(0),
+                      topLeft: Radius.circular(4),
                       topRight: Radius.circular(20),
                       bottomLeft: Radius.circular(20),
                       bottomRight: Radius.circular(20),
                     ),
                     border: Border.all(
-                      color: const Color(0xFF4F46E5).withOpacity(0.3),
+                      color: const Color(0xFF6366F1).withOpacity(0.3),
                       width: 1,
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF4F46E5).withOpacity(0.2),
-                        blurRadius: 10,
-                        spreadRadius: 1,
-                      ),
-                    ],
                   ),
                   child: Text(
                     messageContent,
